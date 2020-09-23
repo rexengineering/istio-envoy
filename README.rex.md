@@ -3,8 +3,8 @@
 To set up your local checkout of this repo properly, follow these steps:
 
 ```
-git clone git@bitbucket.org:rexdev/dex.git
-cd dex 
+git clone git@bitbucket.org:rexdev/istio-envoy.git
+cd istio-envoy
 ./repo_init.sh
 ```
 
