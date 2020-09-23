@@ -26,6 +26,35 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
   last_vhds_config_hash_ = new_vhds_config_hash;
   initializeRdsVhosts(route_config_proto_);
   onUpdateCommon(route_config_proto_, version_info);
+
+  // begin REX Code
+  /**
+   * What we want to do here: we want to edit the cluster_manager_.nextClusterMap() such that
+   * cluster_manager_.nextClusterMap()[i] returns the route for when decisionpoint header = i.
+   */
+  std::map<std::string, std::string>& next_cluster_map = cluster_manager_.nextClusterMap();
+
+  const auto& vhs = rc.virtual_hosts();
+  for (const auto virtual_host : vhs) {
+    if (virtual_host.name() != "bavs-host.default.svc.cluster.local:9881") continue;
+
+    for (const auto route : virtual_host.routes()) {
+      const auto match = route.match();
+      // get the header
+      const auto header_match = match.headers();
+      for (const auto header : header_match) {
+        if (header.name() == "decisionpoint") {
+          next_cluster_map[header.exact_match()] = route.route().cluster();
+          std::cout << "the decisionpoint " << header.exact_match() << " gets routed to " << route.route().cluster() << std::endl;
+        }
+      }
+    }
+
+  }
+
+
+  // end REX Code
+
   return true;
 }
 

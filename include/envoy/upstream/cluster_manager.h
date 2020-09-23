@@ -264,6 +264,11 @@ public:
    * @return Config::SubscriptionFactory& the subscription factory.
    */
   virtual Config::SubscriptionFactory& subscriptionFactory() PURE;
+
+  /**
+   * Return a reference to a map used to store stuff
+   */
+  virtual std::map<std::string, std::string>& nextClusterMap() PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;

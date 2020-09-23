@@ -89,7 +89,7 @@ RdsRouteConfigSubscription::RdsRouteConfigSubscription(
           resource_decoder_);
   local_init_manager_.add(local_init_target_);
   config_update_info_ =
-      std::make_unique<RouteConfigUpdateReceiverImpl>(factory_context.timeSource());
+      std::make_unique<RouteConfigUpdateReceiverImpl>(factory_context.timeSource(), factory_context.clusterManager());
 }
 
 RdsRouteConfigSubscription::~RdsRouteConfigSubscription() {
