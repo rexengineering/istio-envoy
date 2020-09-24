@@ -265,7 +265,7 @@ public:
   void
   initializeSecondaryClusters(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
 
-  std::map<std::string, std::string>& nextClusterMap() override { return next_cluster_map_; };
+  std::map<std::string, Envoy::VirtualServiceRoute>& nextClusterMap() override { return next_cluster_map_; };
 
 protected:
   virtual void postThreadLocalDrainConnections(const Cluster& cluster,
@@ -275,7 +275,7 @@ protected:
                                             const HostVector& hosts_removed);
 
 private:
-  std::map<std::string, std::string> next_cluster_map_;
+  std::map<std::string, Envoy::VirtualServiceRoute> next_cluster_map_;
   /**
    * Thread local cached cluster data. Each thread local cluster gets updates from the parent
    * central dynamic cluster (if applicable). It maintains load balancer state and any created

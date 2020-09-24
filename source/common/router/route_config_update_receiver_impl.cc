@@ -9,6 +9,7 @@
 #include "common/common/fmt.h"
 #include "common/protobuf/utility.h"
 #include "common/router/config_impl.h"
+#include "envoy/upstream/cluster_manager.h"
 
 namespace Envoy {
 namespace Router {
@@ -28,11 +29,7 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
   onUpdateCommon(route_config_proto_, version_info);
 
   // begin REX Code
-  /**
-   * What we want to do here: we want to edit the cluster_manager_.nextClusterMap() such that
-   * cluster_manager_.nextClusterMap()[i] returns the route for when decisionpoint header = i.
-   */
-  std::map<std::string, std::string>& next_cluster_map = cluster_manager_.nextClusterMap();
+  std::map<std::string, Envoy::VirtualServiceRoute>& next_cluster_map = cluster_manager_.nextClusterMap();
 
   const auto& vhs = rc.virtual_hosts();
   for (const auto virtual_host : vhs) {
@@ -44,8 +41,26 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
       const auto header_match = match.headers();
       for (const auto header : header_match) {
         if (header.name() == "decisionpoint") {
-          next_cluster_map[header.exact_match()] = route.route().cluster();
-          std::cout << "the decisionpoint " << header.exact_match() << " gets routed to " << route.route().cluster() << std::endl;
+          std::string decisionpoint = header.exact_match();
+          std::string cluster = route.route().cluster();
+          std::cout << "Set Cluster for decisionpoint" << decisionpoint << " to  " << cluster << std::endl;
+
+          std::string path = "/";  // default to send to `/` path
+          if (route.route().has_regex_rewrite()) {
+            path = route.route().regex_rewrite().substitution();
+            std::cout << "Set Path for decisionpoint" << decisionpoint << " to  " << path << std::endl;
+          }
+
+          std::string method = "POST";  // default to POST
+          for (const auto header_setter : route.request_headers_to_add()) {
+            if (header_setter.header().key() == "method" || header_setter.header().key() == "Method") {
+              method = header_setter.header().value();
+              std::cout << "Set Method for decisionpoint" << decisionpoint << " to  " << method << std::endl;
+            }
+          }
+
+          VirtualServiceRoute vsr(cluster, method, path);
+          next_cluster_map[header.exact_match()] = vsr;
         }
       }
     }

@@ -32,6 +32,22 @@
 #include "envoy/upstream/upstream.h"
 
 namespace Envoy {
+
+class VirtualServiceRoute {
+public:
+  const std::string getCluster() const {return cluster_name_; };
+  const std::string getPath() const {return path_rewrite_; };
+  const std::string getMethod() const {return method_; };
+  VirtualServiceRoute(const VirtualServiceRoute& lhs) : cluster_name_(lhs.cluster_name_), method_(lhs.method_), path_rewrite_(lhs.path_rewrite_) {};
+  VirtualServiceRoute(const std::string& cluster_name, const std::string& method, const std::string& path) :
+    cluster_name_(cluster_name), method_(method), path_rewrite_(path) {};
+  VirtualServiceRoute() : cluster_name_("NA") , method_("NA"), path_rewrite_("NA") {};
+private:
+  std::string cluster_name_;
+  std::string method_;
+  std::string path_rewrite_;
+};
+
 namespace Upstream {
 
 /**
@@ -268,7 +284,7 @@ public:
   /**
    * Return a reference to a map used to store stuff
    */
-  virtual std::map<std::string, std::string>& nextClusterMap() PURE;
+  virtual std::map<std::string, VirtualServiceRoute>& nextClusterMap() PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
