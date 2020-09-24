@@ -45,11 +45,16 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
           std::string cluster = route.route().cluster();
           std::cout << "Set Cluster for decisionpoint" << decisionpoint << " to  " << cluster << std::endl;
 
-          std::string path = "/";  // default to send to `/` path
+          std::string;
           if (route.route().has_regex_rewrite()) {
             path = route.route().regex_rewrite().substitution();
-            std::cout << "Set Path for decisionpoint" << decisionpoint << " to  " << path << std::endl;
+          } else {
+            path = route.route().prefix_rewrite();
+            if (path == "") {
+              path = "/";
+            }
           }
+          std::cout << "Set Path for decisionpoint" << decisionpoint << " to  " << path << std::endl;
 
           std::string method = "POST";  // default to POST
           for (const auto header_setter : route.request_headers_to_add()) {
