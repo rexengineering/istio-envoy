@@ -45,7 +45,7 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
           std::string cluster = route.route().cluster();
           std::cout << "Set Cluster for decisionpoint" << decisionpoint << " to  " << cluster << std::endl;
 
-          std::string;
+          std::string path;
           if (route.route().has_regex_rewrite()) {
             path = route.route().regex_rewrite().substitution();
           } else {
