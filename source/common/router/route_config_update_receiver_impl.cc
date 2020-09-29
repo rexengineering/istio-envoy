@@ -30,10 +30,16 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
 
   // begin REX Code
   std::map<std::string, Envoy::VirtualServiceRoute>& next_cluster_map = cluster_manager_.nextClusterMap();
-
+ 
   const auto& vhs = rc.virtual_hosts();
   for (const auto virtual_host : vhs) {
     if (virtual_host.name() != "bavs-host.default.svc.cluster.local:9881") continue;
+
+    // record the keys of the routes we know about to see if any disappear
+    std::vector<std::string> keys;
+    for (const auto& it : next_cluster_map) {
+      keys.push_back(it.first);
+    }
 
     for (const auto route : virtual_host.routes()) {
       const auto match = route.match();
@@ -43,7 +49,7 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
         if (header.name() == "decisionpoint") {
           std::string decisionpoint = header.exact_match();
           std::string cluster = route.route().cluster();
-          std::cout << "Set Cluster for decisionpoint" << decisionpoint << " to  " << cluster << std::endl;
+          std::cout << "Set Cluster for decisionpoint " << decisionpoint << " to " << cluster << std::endl;
 
           std::string path;
           if (route.route().has_regex_rewrite()) {
@@ -54,24 +60,34 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
               path = "/";
             }
           }
-          std::cout << "Set Path for decisionpoint" << decisionpoint << " to  " << path << std::endl;
+          std::cout << "Set Path for decisionpoint " << decisionpoint << " to " << path << std::endl;
 
           std::string method = "POST";  // default to POST
           for (const auto header_setter : route.request_headers_to_add()) {
             if (header_setter.header().key() == "method" || header_setter.header().key() == "Method") {
               method = header_setter.header().value();
-              std::cout << "Set Method for decisionpoint" << decisionpoint << " to  " << method << std::endl;
+              std::cout << "Set Method for decisionpoint " << decisionpoint << " to " << method << std::endl;
             }
           }
 
           VirtualServiceRoute vsr(cluster, method, path);
           next_cluster_map[header.exact_match()] = vsr;
+          // remove this route from the list of route keys (if it exists.)
+          auto key = std::find(keys.begin(), keys.end(), header.exact_match());
+          if (key != keys.end()) {
+            keys.erase(key);
+          }
         }
       }
     }
-
+  
+    // at this point, any surviving keys represent routes that have been deleted
+    // so remove them.
+    for (auto& key : keys) {
+      std::cout << "Removing unused route " << key << std::endl;
+      next_cluster_map.erase(key);
+    }
   }
-
 
   // end REX Code
 
