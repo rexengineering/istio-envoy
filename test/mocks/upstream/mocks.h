@@ -335,6 +335,9 @@ public:
   MOCK_METHOD(ClusterUpdateCallbacksHandle*, addThreadLocalClusterUpdateCallbacks_,
               (ClusterUpdateCallbacks & callbacks));
   MOCK_METHOD(Config::SubscriptionFactory&, subscriptionFactory, ());
+  
+  Upstream::VirtualServiceRouteMap virtual_service_route_map_;
+  Upstream::VirtualServiceRouteMap& nextClusterMap() override { return virtual_service_route_map_; }
 
   NiceMock<Http::ConnectionPool::MockInstance> conn_pool_;
   NiceMock<Http::MockAsyncClient> async_client_;

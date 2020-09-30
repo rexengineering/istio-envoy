@@ -29,7 +29,7 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
   onUpdateCommon(route_config_proto_, version_info);
 
   // begin REX Code
-  std::map<std::string, Envoy::VirtualServiceRoute>& next_cluster_map = cluster_manager_.nextClusterMap();
+  Upstream::VirtualServiceRouteMap& next_cluster_map = cluster_manager_.nextClusterMap();
  
   const auto& vhs = rc.virtual_hosts();
   for (const auto virtual_host : vhs) {

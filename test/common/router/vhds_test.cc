@@ -77,7 +77,7 @@ vhds:
   RouteConfigUpdatePtr
   makeRouteConfigUpdate(const envoy::config::route::v3::RouteConfiguration& rc) {
     RouteConfigUpdatePtr config_update_info =
-        std::make_unique<RouteConfigUpdateReceiverImpl>(factory_context_.timeSource());
+        std::make_unique<RouteConfigUpdateReceiverImpl>(factory_context_.timeSource(), cluster_manager_);
     config_update_info->onRdsUpdate(rc, "1");
     return config_update_info;
   }
@@ -90,6 +90,7 @@ vhds:
   Protobuf::util::MessageDifferencer messageDifferencer_;
   std::string default_vhds_config_;
   NiceMock<Envoy::Config::MockSubscriptionFactory> subscription_factory_;
+  NiceMock<Upstream::MockClusterManager> cluster_manager_;
 };
 
 // verify that api_type: DELTA_GRPC passes validation

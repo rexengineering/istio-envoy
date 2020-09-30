@@ -100,6 +100,9 @@ class ClusterManagerFactory;
  * In the second phase all secondary clusters (with endpoint assignments provisioned by xDS servers)
  * are initialized and then the rest of the configuration provisioned through xDS.
  */
+
+using VirtualServiceRouteMap = std::map<std::string, VirtualServiceRoute>;
+
 class ClusterManager {
 public:
   using PrimaryClustersReadyCallback = std::function<void()>;
@@ -284,7 +287,7 @@ public:
   /**
    * Return a reference to a map used to store stuff
    */
-  virtual std::map<std::string, VirtualServiceRoute>& nextClusterMap() PURE;
+  virtual VirtualServiceRouteMap& nextClusterMap() PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
