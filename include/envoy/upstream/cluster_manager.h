@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <thread>
+#include <mutex>
 
 #include "envoy/access_log/access_log.h"
 #include "envoy/api/api.h"
@@ -33,6 +35,22 @@
 
 namespace Envoy {
 namespace Upstream {
+
+/**
+ * This class is used to store and safely delete a RequestHeaderMapImpl that is sent
+ * asynchronously by a filter and where the filter may go out of scope before the stuff gets
+ * properly sent over.
+ */
+class AsyncStreamCallbacksAndHeaders : public Http::AsyncClient::StreamCallbacks {
+public:
+  virtual ~AsyncStreamCallbacksAndHeaders() = default;
+  virtual void onHeaders(Http::ResponseHeaderMapPtr&&, bool) PURE;
+  virtual void onTrailers(Http::ResponseTrailerMapPtr&&) PURE;
+  virtual void onComplete() PURE;
+  virtual void onReset() PURE;
+  virtual void onData(Buffer::Instance&, bool) PURE;
+  virtual Http::RequestHeaderMap& requestHeaderMap() PURE;
+};
 
 /**
  * ClusterUpdateCallbacks provide a way to exposes Cluster lifecycle events in the
@@ -264,6 +282,19 @@ public:
    * @return Config::SubscriptionFactory& the subscription factory.
    */
   virtual Config::SubscriptionFactory& subscriptionFactory() PURE;
+
+  /**
+   * Returns a reference to a vector that stores HttpRequestStuff. Each HttpRequestStuff
+   * belongs to a single outgoing Asynchronous Http Request created using the AsyncClient.
+   * THe HttpRequestStuff implements AsyncClient::StreamCallbacks. Crucially, the
+   * onComplete() method MUST remove the HttpRequestStuff from the container. The
+   * std::string is the key of the map, and each HttpRequestStuff knows its own key.
+   * The HttpRequestStuff also contains the Http::RequestHeaderMapImpl object that gets
+   * asynchronously sent during performance of the asynchronous HTTP Request.
+   */
+  virtual std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() PURE;
+
+  virtual std::mutex& httpRequestStorageMutex() PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;

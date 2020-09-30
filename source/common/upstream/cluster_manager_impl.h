@@ -265,6 +265,14 @@ public:
   void
   initializeSecondaryClusters(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
 
+  std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() override {
+    return http_request_storage_map_;
+  };
+
+  std::mutex& httpRequestStorageMutex() override {
+    return http_request_storage_mutex_;
+  }
+
 protected:
   virtual void postThreadLocalDrainConnections(const Cluster& cluster,
                                                const HostVector& hosts_removed);
@@ -509,6 +517,8 @@ private:
   Http::Context& http_context_;
   Config::SubscriptionFactoryImpl subscription_factory_;
   ClusterSet primary_clusters_;
+  std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>> http_request_storage_map_;
+  std::mutex http_request_storage_mutex_;
 };
 
 } // namespace Upstream
