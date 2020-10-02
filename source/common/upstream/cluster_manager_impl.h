@@ -265,12 +265,26 @@ public:
   void
   initializeSecondaryClusters(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
 
-  std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() override {
-    return http_request_storage_map_;
-  };
+  // std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() override {
+  //   return http_request_storage_map_;
+  // };
 
-  std::mutex& httpRequestStorageMutex() override {
-    return http_request_storage_mutex_;
+  // std::mutex& httpRequestStorageMutex() override {
+  //   return http_request_storage_mutex_;
+  // }
+
+  void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) override {
+    std::lock_guard<std::mutex> lock(http_request_storage_mutex_);    
+    std::cout << "ClusterManager storing before " << id << ' ' << http_request_storage_map_.size() << std::endl;
+    http_request_storage_map_[id] = std::unique_ptr<AsyncStreamCallbacksAndHeaders>(cb);
+    std::cout << "ClusterManager storing after " << id << ' ' << http_request_storage_map_.size() << std::endl;
+  }
+
+  void eraseCallbackAndHeaders(std::string& id) override {
+    std::lock_guard<std::mutex> lock(http_request_storage_mutex_);
+    std::cout << "ClusterManager releasing before " << id << ' ' << http_request_storage_map_.size() << std::endl;
+    http_request_storage_map_.erase(id);
+    std::cout << "ClusterManager releasing after " << id << ' ' << http_request_storage_map_.size() << std::endl;
   }
 
 protected:

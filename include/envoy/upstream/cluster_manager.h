@@ -292,9 +292,14 @@ public:
    * The HttpRequestStuff also contains the Http::RequestHeaderMapImpl object that gets
    * asynchronously sent during performance of the asynchronous HTTP Request.
    */
-  virtual std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() PURE;
+  // virtual std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() PURE;
 
-  virtual std::mutex& httpRequestStorageMutex() PURE;
+  // virtual std::mutex& httpRequestStorageMutex() PURE;
+
+  virtual void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) PURE;
+
+  virtual void eraseCallbackAndHeaders(std::string& id) PURE;
+
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
