@@ -265,14 +265,6 @@ public:
   void
   initializeSecondaryClusters(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
 
-  // std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() override {
-  //   return http_request_storage_map_;
-  // };
-
-  // std::mutex& httpRequestStorageMutex() override {
-  //   return http_request_storage_mutex_;
-  // }
-
   void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) override {
     std::lock_guard<std::mutex> lock(http_request_storage_mutex_);    
     std::cout << "ClusterManager storing before " << id << ' ' << http_request_storage_map_.size() << std::endl;
@@ -280,7 +272,9 @@ public:
     std::cout << "ClusterManager storing after " << id << ' ' << http_request_storage_map_.size() << std::endl;
   }
 
-  void eraseCallbackAndHeaders(std::string& id) override {
+  // pass in a copy of the id, as the erase() below with call the dtor of the class that owns the id
+  // which can lead to bad things.
+  void eraseCallbackAndHeaders(std::string id) override {
     std::lock_guard<std::mutex> lock(http_request_storage_mutex_);
     std::cout << "ClusterManager releasing before " << id << ' ' << http_request_storage_map_.size() << std::endl;
     http_request_storage_map_.erase(id);

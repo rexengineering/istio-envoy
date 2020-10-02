@@ -283,23 +283,9 @@ public:
    */
   virtual Config::SubscriptionFactory& subscriptionFactory() PURE;
 
-  /**
-   * Returns a reference to a vector that stores HttpRequestStuff. Each HttpRequestStuff
-   * belongs to a single outgoing Asynchronous Http Request created using the AsyncClient.
-   * THe HttpRequestStuff implements AsyncClient::StreamCallbacks. Crucially, the
-   * onComplete() method MUST remove the HttpRequestStuff from the container. The
-   * std::string is the key of the map, and each HttpRequestStuff knows its own key.
-   * The HttpRequestStuff also contains the Http::RequestHeaderMapImpl object that gets
-   * asynchronously sent during performance of the asynchronous HTTP Request.
-   */
-  // virtual std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>>& httpRequestStorageMap() PURE;
-
-  // virtual std::mutex& httpRequestStorageMutex() PURE;
-
   virtual void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) PURE;
 
-  virtual void eraseCallbackAndHeaders(std::string& id) PURE;
-
+  virtual void eraseCallbackAndHeaders(std::string id) PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
