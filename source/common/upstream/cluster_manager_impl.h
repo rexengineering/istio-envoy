@@ -267,18 +267,20 @@ public:
 
   void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) override {
     std::lock_guard<std::mutex> lock(http_request_storage_mutex_);    
-    std::cout << "ClusterManager storing before " << id << ' ' << http_request_storage_map_.size() << std::endl;
     http_request_storage_map_[id] = std::unique_ptr<AsyncStreamCallbacksAndHeaders>(cb);
-    std::cout << "ClusterManager storing after " << id << ' ' << http_request_storage_map_.size() << std::endl;
   }
 
   // pass in a copy of the id, as the erase() below with call the dtor of the class that owns the id
   // which can lead to bad things.
-  void eraseCallbackAndHeaders(std::string id) override {
+  void eraseCallbacksAndHeaders(std::string id) override {
     std::lock_guard<std::mutex> lock(http_request_storage_mutex_);
-    std::cout << "ClusterManager releasing before " << id << ' ' << http_request_storage_map_.size() << std::endl;
     http_request_storage_map_.erase(id);
-    std::cout << "ClusterManager releasing after " << id << ' ' << http_request_storage_map_.size() << std::endl;
+  }
+
+  AsyncStreamCallbacksAndHeaders* getCallbacksAndHeaders(std::string& id) override {
+    std::lock_guard<std::mutex> lock(http_request_storage_mutex_);
+    auto it = http_request_storage_map_.find(id);
+    return (it == http_request_storage_map_.end()) ? nullptr : it->second.get();
   }
 
 protected:
