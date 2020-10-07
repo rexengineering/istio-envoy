@@ -306,7 +306,6 @@ public:
    * Return a reference to a map used to store stuff
    */
   virtual VirtualServiceRouteMap& nextClusterMap() PURE;
-  
   virtual void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) PURE;
 
   virtual void eraseCallbacksAndHeaders(std::string id) PURE;

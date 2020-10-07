@@ -27,6 +27,7 @@
 #include "common/config/grpc_mux_impl.h"
 #include "common/config/subscription_factory_impl.h"
 #include "common/http/async_client_impl.h"
+#include "common/http/header_map_impl.h"
 #include "common/upstream/load_stats_reporter.h"
 #include "common/upstream/priority_conn_pool_map.h"
 #include "common/upstream/upstream_impl.h"
@@ -266,7 +267,7 @@ public:
   initializeSecondaryClusters(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
 
   std::map<std::string, Envoy::VirtualServiceRoute>& nextClusterMap() override { return next_cluster_map_; };
-  
+
   void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) override {
     std::lock_guard<std::mutex> lock(http_request_storage_mutex_);    
     http_request_storage_map_[id] = std::unique_ptr<AsyncStreamCallbacksAndHeaders>(cb);
@@ -532,6 +533,51 @@ private:
   ClusterSet primary_clusters_;
   std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>> http_request_storage_map_;
   std::mutex http_request_storage_mutex_;
+};
+
+class CallbacksAndHeaders : public Envoy::Upstream::AsyncStreamCallbacksAndHeaders {
+public:
+    ~CallbacksAndHeaders() = default;
+    CallbacksAndHeaders(std::string id, std::unique_ptr<Http::RequestHeaderMapImpl> headers, Upstream::ClusterManager& cm) 
+        : id_(id), headers_(std::move(headers)), cluster_manager_(cm) {
+        cluster_manager_.storeCallbacksAndHeaders(id, this);
+    }
+
+    void onHeaders(Http::ResponseHeaderMapPtr&&, bool) override {}
+    void onData(Buffer::Instance&, bool) override {}
+    void onTrailers(Http::ResponseTrailerMapPtr&&) override {}
+    void onReset() override {}
+    void onComplete() override {
+        // remove ourself from the clusterManager
+        cluster_manager_.eraseCallbacksAndHeaders(id_);
+    }
+    Http::RequestHeaderMapImpl& requestHeaderMap() override {
+        return *(headers_.get());
+    }
+
+    void setRequestStream(Http::AsyncClient::Stream* stream) { request_stream_ = stream;}
+    Http::AsyncClient::Stream* requestStream() { return request_stream_; }
+
+    void setResponseStream(Http::AsyncClient::Stream* stream) { response_stream_ = stream;}
+    Http::AsyncClient::Stream* responseStream() { return response_stream_; }
+
+    void setRequestKey(std::string& key) { request_key_ = key;}
+    std::string& getRequestKey() { return request_key_;}
+
+    void setResponseKey(std::string& key) { response_key_ = key;}
+    std::string& getResponseKey() { return response_key_;}
+
+private:
+    std::string id_;
+    std::unique_ptr<Http::RequestHeaderMapImpl> headers_;
+    Upstream::ClusterManager& cluster_manager_;
+
+    Http::AsyncClient::Stream* request_stream_;
+    Http::AsyncClient::Stream* response_stream_;
+
+    std::string request_key_;
+    std::string response_key_;
+
 };
 
 } // namespace Upstream
