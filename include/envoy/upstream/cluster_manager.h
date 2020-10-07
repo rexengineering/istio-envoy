@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <thread>
+#include <mutex>
 
 #include "envoy/access_log/access_log.h"
 #include "envoy/api/api.h"
@@ -33,6 +35,22 @@
 
 namespace Envoy {
 namespace Upstream {
+
+/**
+ * This class is used to store and safely delete a RequestHeaderMapImpl that is sent
+ * asynchronously by a filter and where the filter may go out of scope before the stuff gets
+ * properly sent over.
+ */
+class AsyncStreamCallbacksAndHeaders : public Http::AsyncClient::StreamCallbacks {
+public:
+  virtual ~AsyncStreamCallbacksAndHeaders() = default;
+  virtual void onHeaders(Http::ResponseHeaderMapPtr&&, bool) PURE;
+  virtual void onTrailers(Http::ResponseTrailerMapPtr&&) PURE;
+  virtual void onComplete() PURE;
+  virtual void onReset() PURE;
+  virtual void onData(Buffer::Instance&, bool) PURE;
+  virtual Http::RequestHeaderMap& requestHeaderMap() PURE;
+};
 
 /**
  * ClusterUpdateCallbacks provide a way to exposes Cluster lifecycle events in the
@@ -264,6 +282,12 @@ public:
    * @return Config::SubscriptionFactory& the subscription factory.
    */
   virtual Config::SubscriptionFactory& subscriptionFactory() PURE;
+
+  virtual void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) PURE;
+
+  virtual void eraseCallbacksAndHeaders(std::string id) PURE;
+
+  virtual AsyncStreamCallbacksAndHeaders* getCallbacksAndHeaders(std::string& id) PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
