@@ -292,6 +292,12 @@ public:
    * @return a stream handle or nullptr if no stream could be started. NOTE: In this case
    *         onResetStream() has already been called inline. The client owns the stream and
    *         the handle can be used to send more messages or close the stream.
+   * 
+   * 
+   * NOTE FROM AN ENGINEER WITH A FUNCTIONING BRAIN!!!!!!!!!!!!!!! | | |
+   *                                                               V V V
+   * "the client owns the request" means "the ASYNCCLIENT owns the request, so you'd damn
+   * better not free it"
    */
   virtual Stream* start(StreamCallbacks& callbacks, const StreamOptions& options) PURE;
 
