@@ -336,8 +336,10 @@ public:
               (ClusterUpdateCallbacks & callbacks));
   MOCK_METHOD(Config::SubscriptionFactory&, subscriptionFactory, ());
   
-  Upstream::VirtualServiceRouteMap virtual_service_route_map_;
-  Upstream::VirtualServiceRouteMap& nextClusterMap() override { return virtual_service_route_map_; }
+  MOCK_METHOD(Upstream::VirtualServiceRouteMap&, nextClusterMap, ());
+  MOCK_METHOD(void, storeCallbacksAndHeaders, (std::string& id, AsyncStreamCallbacksAndHeaders* cb));
+  MOCK_METHOD(void, eraseCallbacksAndHeaders, (std::string id));
+  MOCK_METHOD(AsyncStreamCallbacksAndHeaders*, getCallbacksAndHeaders, (std::string& id));
 
   NiceMock<Http::ConnectionPool::MockInstance> conn_pool_;
   NiceMock<Http::MockAsyncClient> async_client_;
