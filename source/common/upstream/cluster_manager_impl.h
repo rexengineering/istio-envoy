@@ -555,29 +555,14 @@ public:
         return *(headers_.get());
     }
 
-    void setRequestStream(Http::AsyncClient::Stream* stream) { request_stream_ = stream;}
-    Http::AsyncClient::Stream* requestStream() { return request_stream_; }
-
-    void setResponseStream(Http::AsyncClient::Stream* stream) { response_stream_ = stream;}
-    Http::AsyncClient::Stream* responseStream() { return response_stream_; }
-
-    void setRequestKey(std::string& key) { request_key_ = key;}
-    std::string& getRequestKey() { return request_key_;}
-
-    void setResponseKey(std::string& key) { response_key_ = key;}
-    std::string& getResponseKey() { return response_key_;}
+    void setStream(Http::AsyncClient::Stream* stream) override { request_stream_ = stream;}
+    Http::AsyncClient::Stream* getStream() override { return request_stream_; }
 
 private:
     std::string id_;
     std::unique_ptr<Http::RequestHeaderMapImpl> headers_;
     Upstream::ClusterManager& cluster_manager_;
-
     Http::AsyncClient::Stream* request_stream_;
-    Http::AsyncClient::Stream* response_stream_;
-
-    std::string request_key_;
-    std::string response_key_;
-
 };
 
 } // namespace Upstream

@@ -66,6 +66,8 @@ public:
   virtual void onReset() PURE;
   virtual void onData(Buffer::Instance&, bool) PURE;
   virtual Http::RequestHeaderMap& requestHeaderMap() PURE;
+  virtual void setStream(Http::AsyncClient::Stream* stream) PURE;
+  virtual Http::AsyncClient::Stream* getStream() PURE;
 };
 
 /**
