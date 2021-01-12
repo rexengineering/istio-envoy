@@ -9,7 +9,6 @@
 #include "common/common/fmt.h"
 #include "common/protobuf/utility.h"
 #include "common/router/config_impl.h"
-#include "envoy/upstream/cluster_manager.h"
 
 namespace Envoy {
 namespace Router {
@@ -27,70 +26,6 @@ bool RouteConfigUpdateReceiverImpl::onRdsUpdate(
   last_vhds_config_hash_ = new_vhds_config_hash;
   initializeRdsVhosts(route_config_proto_);
   onUpdateCommon(route_config_proto_, version_info);
-
-  // begin REX Code
-  Upstream::VirtualServiceRouteMap& next_cluster_map = cluster_manager_.nextClusterMap();
- 
-  const auto& vhs = rc.virtual_hosts();
-  for (const auto virtual_host : vhs) {
-    if (virtual_host.name() != "bavs-host.default.svc.cluster.local:9881") continue;
-
-    // record the keys of the routes we know about to see if any disappear
-    std::set<std::string> keys;
-    for (const auto& it : next_cluster_map) {
-      keys.emplace(it.first);
-    }
-
-    for (const auto route : virtual_host.routes()) {
-      const auto match = route.match();
-      // get the header
-      const auto header_match = match.headers();
-      for (const auto header : header_match) {
-        if (header.name() == "decisionpoint") {
-          std::string decisionpoint = header.exact_match();
-          std::string cluster = route.route().cluster();
-          std::cout << "Set Cluster for decisionpoint " << decisionpoint << " to " << cluster << std::endl;
-
-          std::string path;
-          if (route.route().has_regex_rewrite()) {
-            path = route.route().regex_rewrite().substitution();
-          } else {
-            path = route.route().prefix_rewrite();
-            if (path == "") {
-              path = "/";
-            }
-          }
-          std::cout << "Set Path for decisionpoint " << decisionpoint << " to " << path << std::endl;
-
-          std::string method = "POST";  // default to POST
-          for (const auto header_setter : route.request_headers_to_add()) {
-            if (header_setter.header().key() == "method" || header_setter.header().key() == "Method") {
-              method = header_setter.header().value();
-              std::cout << "Set Method for decisionpoint " << decisionpoint << " to " << method << std::endl;
-            }
-          }
-
-          VirtualServiceRoute vsr(cluster, method, path);
-          next_cluster_map[header.exact_match()] = vsr;
-          // remove this route from the list of route keys (if it exists.)
-          auto key = keys.find(header.exact_match());
-          if (key != keys.end()) {
-            keys.erase(key);
-          }
-        }
-      }
-    }
-  
-    // at this point, any surviving keys represent routes that have been deleted
-    // so remove them.
-    for (auto& key : keys) {
-      std::cout << "Removing unused route " << key << std::endl;
-      next_cluster_map.erase(key);
-    }
-  }
-
-  // end REX Code
-
   return true;
 }
 

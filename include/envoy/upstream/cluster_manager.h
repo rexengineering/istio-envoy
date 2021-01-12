@@ -34,22 +34,6 @@
 #include "envoy/upstream/upstream.h"
 
 namespace Envoy {
-
-class VirtualServiceRoute {
-public:
-  const std::string getCluster() const {return cluster_name_; };
-  const std::string getPath() const {return path_rewrite_; };
-  const std::string getMethod() const {return method_; };
-  VirtualServiceRoute(const VirtualServiceRoute& lhs) : cluster_name_(lhs.cluster_name_), method_(lhs.method_), path_rewrite_(lhs.path_rewrite_) {};
-  VirtualServiceRoute(const std::string& cluster_name, const std::string& method, const std::string& path) :
-    cluster_name_(cluster_name), method_(method), path_rewrite_(path) {};
-  VirtualServiceRoute() : cluster_name_("NA") , method_("NA"), path_rewrite_("NA") {};
-private:
-  std::string cluster_name_;
-  std::string method_;
-  std::string path_rewrite_;
-};
-
 namespace Upstream {
 
 /**
@@ -120,9 +104,6 @@ class ClusterManagerFactory;
  * In the second phase all secondary clusters (with endpoint assignments provisioned by xDS servers)
  * are initialized and then the rest of the configuration provisioned through xDS.
  */
-
-using VirtualServiceRouteMap = std::map<std::string, VirtualServiceRoute>;
-
 class ClusterManager {
 public:
   using PrimaryClustersReadyCallback = std::function<void()>;
@@ -303,11 +284,6 @@ public:
    * @return Config::SubscriptionFactory& the subscription factory.
    */
   virtual Config::SubscriptionFactory& subscriptionFactory() PURE;
-
-  /**
-   * Return a reference to a map used to store stuff
-   */
-  virtual VirtualServiceRouteMap& nextClusterMap() PURE;
 
   virtual void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) PURE;
 

@@ -17,8 +17,8 @@ namespace Router {
 
 class RouteConfigUpdateReceiverImpl : public RouteConfigUpdateReceiver {
 public:
-  RouteConfigUpdateReceiverImpl(TimeSource& time_source, Upstream::ClusterManager& cluster_manager)
-      : time_source_(time_source), cluster_manager_(cluster_manager), last_config_hash_(0ull), last_vhds_config_hash_(0ul),
+  RouteConfigUpdateReceiverImpl(TimeSource& time_source)
+      : time_source_(time_source), last_config_hash_(0ull), last_vhds_config_hash_(0ul),
         vhds_configuration_changed_(true) {}
 
   void initializeRdsVhosts(const envoy::config::route::v3::RouteConfiguration& route_configuration);
@@ -58,7 +58,6 @@ public:
 
 private:
   TimeSource& time_source_;
-  Upstream::ClusterManager& cluster_manager_;
   envoy::config::route::v3::RouteConfiguration route_config_proto_;
   uint64_t last_config_hash_;
   uint64_t last_vhds_config_hash_;
