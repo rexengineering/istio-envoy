@@ -64,6 +64,9 @@ public:
   MOCK_METHOD(ClusterUpdateCallbacksHandle*, addThreadLocalClusterUpdateCallbacks_,
               (ClusterUpdateCallbacks & callbacks));
   MOCK_METHOD(Config::SubscriptionFactory&, subscriptionFactory, ());
+  MOCK_METHOD(void, storeCallbacksAndHeaders, (std::string& id, AsyncStreamCallbacksAndHeaders* cb));
+  MOCK_METHOD(void, eraseCallbacksAndHeaders, (std::string id));
+  MOCK_METHOD(AsyncStreamCallbacksAndHeaders*, getCallbacksAndHeaders, (std::string& id));
 
   NiceMock<Http::ConnectionPool::MockInstance> conn_pool_;
   NiceMock<Http::MockAsyncClient> async_client_;
