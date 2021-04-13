@@ -13,6 +13,16 @@ namespace Envoy {
 namespace Json {
 class Object;
 
+enum class Type {
+  Array,
+  Boolean,
+  Double,
+  Integer,
+  Null,
+  Object,
+  String,
+};
+
 using ObjectSharedPtr = std::shared_ptr<Object>;
 
 // @return false if immediate exit from iteration required.
@@ -33,9 +43,12 @@ class Object {
 public:
   virtual ~Object() = default;
 
+  virtual Type type() const PURE;
+
   /**
    * Convert a generic object into an array of objects. This is useful for dealing
    * with arrays of arrays.
+   * Throws exception if `isArray()` is false.
    * @return std::vector<ObjectSharedPtr> the converted object.
    */
   virtual std::vector<ObjectSharedPtr> asObjectArray() const PURE;
@@ -74,7 +87,8 @@ public:
    * Get a sub-object by name.
    * @param name supplies the key name.
    * @param allow_empty supplies whether to return an empty object if the key does not
-   * exist.
+   * exist. Throws an exception if the key is a string/int/bool/double rather than 
+   * an Object.
    * @return ObjectObjectSharedPtr the sub-object.
    */
   virtual ObjectSharedPtr getObject(const std::string& name, bool allow_empty = false) const PURE;

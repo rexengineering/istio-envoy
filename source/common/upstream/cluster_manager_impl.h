@@ -272,21 +272,37 @@ public:
   initializeSecondaryClusters(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
 
   void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) override {
-    std::lock_guard<std::mutex> lock(http_request_storage_mutex_);    
-    http_request_storage_map_[id] = std::unique_ptr<AsyncStreamCallbacksAndHeaders>(cb);
+    std::lock_guard<std::mutex> lock(cb_and_header_storage_mutex_);
+    cb_and_header_storage_map_[id] = std::unique_ptr<AsyncStreamCallbacksAndHeaders>(cb);
   }
 
   // pass in a copy of the id, as the erase() below with call the dtor of the class that owns the id
   // which can lead to bad things.
   void eraseCallbacksAndHeaders(std::string id) override {
-    std::lock_guard<std::mutex> lock(http_request_storage_mutex_);
-    http_request_storage_map_.erase(id);
+    std::lock_guard<std::mutex> lock(cb_and_header_storage_mutex_);
+    cb_and_header_storage_map_.erase(id);
   }
 
   AsyncStreamCallbacksAndHeaders* getCallbacksAndHeaders(std::string& id) override {
-    std::lock_guard<std::mutex> lock(http_request_storage_mutex_);
-    auto it = http_request_storage_map_.find(id);
-    return (it == http_request_storage_map_.end()) ? nullptr : it->second.get();
+    std::lock_guard<std::mutex> lock(cb_and_header_storage_mutex_);
+    auto it = cb_and_header_storage_map_.find(id);
+    return (it == cb_and_header_storage_map_.end()) ? nullptr : it->second.get();
+  }
+
+  void storeRequestCallbacks(std::string& id, Http::AsyncClient::Callbacks* cb) override {
+    std::lock_guard<std::mutex> lock(request_cb_storage_mutex_);
+    request_cb_storage_map_[id] = std::unique_ptr<Http::AsyncClient::Callbacks>(cb);
+  }
+
+  Http::AsyncClient::Callbacks* getRequestCallbacks(std::string& id) override {
+    std::lock_guard<std::mutex> lock(request_cb_storage_mutex_);
+    auto it = request_cb_storage_map_.find(id);
+    return (it == request_cb_storage_map_.end()) ? nullptr : it->second.get();
+  }
+
+  void eraseRequestCallbacks(std::string id) override {
+    std::lock_guard<std::mutex> lock(request_cb_storage_mutex_);
+    request_cb_storage_map_.erase(id);
   }
 
 protected:
@@ -542,8 +558,10 @@ private:
   Http::Context& http_context_;
   Config::SubscriptionFactoryImpl subscription_factory_;
   ClusterSet primary_clusters_;
-  std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>> http_request_storage_map_;
-  std::mutex http_request_storage_mutex_;
+  std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>> cb_and_header_storage_map_;
+  std::mutex cb_and_header_storage_mutex_;
+  std::map<std::string, std::unique_ptr<Http::AsyncClient::Callbacks>> request_cb_storage_map_;
+  std::mutex request_cb_storage_mutex_;
 };
 
 class CallbacksAndHeaders : public Envoy::Upstream::AsyncStreamCallbacksAndHeaders {

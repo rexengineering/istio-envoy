@@ -291,6 +291,12 @@ public:
   virtual void eraseCallbacksAndHeaders(std::string id) PURE;
 
   virtual AsyncStreamCallbacksAndHeaders* getCallbacksAndHeaders(std::string& id) PURE;
+
+  virtual void storeRequestCallbacks(std::string& id, Http::AsyncClient::Callbacks* cb) PURE;
+
+  virtual void eraseRequestCallbacks(std::string id) PURE;
+
+  virtual Http::AsyncClient::Callbacks* getRequestCallbacks(std::string& id) PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;

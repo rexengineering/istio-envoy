@@ -91,15 +91,6 @@ public:
   void validateSchema(const std::string& schema) const override;
 
 private:
-  enum class Type {
-    Array,
-    Boolean,
-    Double,
-    Integer,
-    Null,
-    Object,
-    String,
-  };
   static const char* typeAsString(Type t) {
     switch (t) {
     case Type::Array:
@@ -136,6 +127,7 @@ private:
   explicit Field(double value) : type_(Type::Double) { value_.double_value_ = value; }
   explicit Field(bool value) : type_(Type::Boolean) { value_.boolean_value_ = value; }
 
+  Type type() const override { return type_; }
   bool isType(Type type) const { return type == type_; }
   void checkType(Type type) const {
     if (!isType(type)) {
