@@ -67,6 +67,9 @@ public:
   MOCK_METHOD(void, storeCallbacksAndHeaders, (std::string& id, AsyncStreamCallbacksAndHeaders* cb));
   MOCK_METHOD(void, eraseCallbacksAndHeaders, (std::string id));
   MOCK_METHOD(AsyncStreamCallbacksAndHeaders*, getCallbacksAndHeaders, (std::string& id));
+  MOCK_METHOD(Http::AsyncClient::Callbacks*, getRequestCallbacks, (std::string& id));
+  MOCK_METHOD(void, eraseRequestCallbacks, (std::string id));
+  MOCK_METHOD(void, storeRequestCallbacks, (std::string& id, Http::AsyncClient::Callbacks* cb));
 
   NiceMock<Http::ConnectionPool::MockInstance> conn_pool_;
   NiceMock<Http::MockAsyncClient> async_client_;
