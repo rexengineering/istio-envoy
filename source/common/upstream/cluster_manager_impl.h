@@ -30,6 +30,7 @@
 #include "common/config/grpc_mux_impl.h"
 #include "common/config/subscription_factory_impl.h"
 #include "common/http/async_client_impl.h"
+#include "common/http/header_map_impl.h"
 #include "common/upstream/load_stats_reporter.h"
 #include "common/upstream/priority_conn_pool_map.h"
 #include "common/upstream/upstream_impl.h"
@@ -304,6 +305,40 @@ public:
   }
   const ClusterTimeoutBudgetStatNames& clusterTimeoutBudgetStatNames() const override {
     return cluster_timeout_budget_stat_names_;
+  }
+
+  void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) override {
+    std::lock_guard<std::mutex> lock(cb_and_header_storage_mutex_);
+    cb_and_header_storage_map_[id] = std::unique_ptr<AsyncStreamCallbacksAndHeaders>(cb);
+  }
+
+  // pass in a copy of the id, as the erase() below with call the dtor of the class that owns the id
+  // which can lead to bad things.
+  void eraseCallbacksAndHeaders(std::string id) override {
+    std::lock_guard<std::mutex> lock(cb_and_header_storage_mutex_);
+    cb_and_header_storage_map_.erase(id);
+  }
+
+  AsyncStreamCallbacksAndHeaders* getCallbacksAndHeaders(std::string& id) override {
+    std::lock_guard<std::mutex> lock(cb_and_header_storage_mutex_);
+    auto it = cb_and_header_storage_map_.find(id);
+    return (it == cb_and_header_storage_map_.end()) ? nullptr : it->second.get();
+  }
+
+  void storeRequestCallbacks(std::string& id, Http::AsyncClient::Callbacks* cb) override {
+    std::lock_guard<std::mutex> lock(request_cb_storage_mutex_);
+    request_cb_storage_map_[id] = std::unique_ptr<Http::AsyncClient::Callbacks>(cb);
+  }
+
+  Http::AsyncClient::Callbacks* getRequestCallbacks(std::string& id) override {
+    std::lock_guard<std::mutex> lock(request_cb_storage_mutex_);
+    auto it = request_cb_storage_map_.find(id);
+    return (it == request_cb_storage_map_.end()) ? nullptr : it->second.get();
+  }
+
+  void eraseRequestCallbacks(std::string id) override {
+    std::lock_guard<std::mutex> lock(request_cb_storage_mutex_);
+    request_cb_storage_map_.erase(id);
   }
 
 protected:
@@ -612,6 +647,41 @@ private:
 
   Config::SubscriptionFactoryImpl subscription_factory_;
   ClusterSet primary_clusters_;
+  std::map<std::string, std::unique_ptr<AsyncStreamCallbacksAndHeaders>> cb_and_header_storage_map_;
+  std::mutex cb_and_header_storage_mutex_;
+  std::map<std::string, std::unique_ptr<Http::AsyncClient::Callbacks>> request_cb_storage_map_;
+  std::mutex request_cb_storage_mutex_;
+};
+
+class CallbacksAndHeaders : public Envoy::Upstream::AsyncStreamCallbacksAndHeaders {
+public:
+    ~CallbacksAndHeaders() = default;
+    CallbacksAndHeaders(std::string id, std::unique_ptr<Http::RequestHeaderMapImpl> headers, Upstream::ClusterManager& cm) 
+        : id_(id), headers_(std::move(headers)), cluster_manager_(cm) {
+        cluster_manager_.storeCallbacksAndHeaders(id, this);
+    }
+
+    void onHeaders(Http::ResponseHeaderMapPtr&&, bool) override {}
+    void onData(Buffer::Instance&, bool) override {}
+    void onTrailers(Http::ResponseTrailerMapPtr&&) override {}
+    void onReset() override {}
+    void onComplete() override {
+        // remove ourself from the clusterManager
+        cluster_manager_.eraseCallbacksAndHeaders(id_);
+    }
+    Http::RequestHeaderMapImpl& requestHeaderMap() override {
+        return *(headers_.get());
+    }
+
+    void setStream(Http::AsyncClient::Stream* stream) override { request_stream_ = stream;}
+    Http::AsyncClient::Stream* getStream() override { return request_stream_; }
+
+private:
+    std::string id_;
+    std::unique_ptr<Http::RequestHeaderMapImpl> headers_;
+    Upstream::ClusterManager& cluster_manager_;
+    Http::AsyncClient::Stream* request_stream_;
+
 };
 
 } // namespace Upstream

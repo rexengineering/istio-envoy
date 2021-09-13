@@ -39,6 +39,24 @@ namespace Envoy {
 namespace Upstream {
 
 /**
+ * This class is used to store and safely delete a RequestHeaderMapImpl that is sent
+ * asynchronously by a filter and where the filter may go out of scope before the stuff gets
+ * properly sent over.
+ */
+class AsyncStreamCallbacksAndHeaders : public Http::AsyncClient::StreamCallbacks {
+public:
+  virtual ~AsyncStreamCallbacksAndHeaders() = default;
+  virtual void onHeaders(Http::ResponseHeaderMapPtr&&, bool) PURE;
+  virtual void onTrailers(Http::ResponseTrailerMapPtr&&) PURE;
+  virtual void onComplete() PURE;
+  virtual void onReset() PURE;
+  virtual void onData(Buffer::Instance&, bool) PURE;
+  virtual Http::RequestHeaderMap& requestHeaderMap() PURE;
+  virtual void setStream(Http::AsyncClient::Stream* stream) PURE;
+  virtual Http::AsyncClient::Stream* getStream() PURE;
+};
+
+/**
  * ClusterUpdateCallbacks provide a way to exposes Cluster lifecycle events in the
  * ClusterManager.
  */
@@ -309,6 +327,13 @@ public:
   virtual const ClusterRequestResponseSizeStatNames&
   clusterRequestResponseSizeStatNames() const PURE;
   virtual const ClusterTimeoutBudgetStatNames& clusterTimeoutBudgetStatNames() const PURE;
+
+  virtual void storeCallbacksAndHeaders(std::string& id, AsyncStreamCallbacksAndHeaders* cb) PURE;
+  virtual void eraseCallbacksAndHeaders(std::string id) PURE;
+  virtual AsyncStreamCallbacksAndHeaders* getCallbacksAndHeaders(std::string& id) PURE;
+  virtual void storeRequestCallbacks(std::string& id, Http::AsyncClient::Callbacks* cb) PURE;
+  virtual void eraseRequestCallbacks(std::string id) PURE;
+  virtual Http::AsyncClient::Callbacks* getRequestCallbacks(std::string& id) PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;

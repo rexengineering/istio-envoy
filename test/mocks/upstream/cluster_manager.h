@@ -55,6 +55,13 @@ public:
   MOCK_METHOD(ClusterUpdateCallbacksHandle*, addThreadLocalClusterUpdateCallbacks_,
               (ClusterUpdateCallbacks & callbacks));
   MOCK_METHOD(Config::SubscriptionFactory&, subscriptionFactory, ());
+  MOCK_METHOD(void, storeCallbacksAndHeaders, (std::string& id, AsyncStreamCallbacksAndHeaders* cb));
+  MOCK_METHOD(void, eraseCallbacksAndHeaders, (std::string id));
+  MOCK_METHOD(AsyncStreamCallbacksAndHeaders*, getCallbacksAndHeaders, (std::string& id));
+  MOCK_METHOD(Http::AsyncClient::Callbacks*, getRequestCallbacks, (std::string& id));
+  MOCK_METHOD(void, eraseRequestCallbacks, (std::string id));
+  MOCK_METHOD(void, storeRequestCallbacks, (std::string& id, Http::AsyncClient::Callbacks* cb));
+
   const ClusterStatNames& clusterStatNames() const override { return cluster_stat_names_; }
   const ClusterLoadReportStatNames& clusterLoadReportStatNames() const override {
     return cluster_load_report_stat_names_;
