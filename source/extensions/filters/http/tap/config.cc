@@ -1,12 +1,12 @@
-#include "extensions/filters/http/tap/config.h"
+#include "source/extensions/filters/http/tap/config.h"
 
 #include "envoy/config/tap/v3/common.pb.h"
 #include "envoy/extensions/filters/http/tap/v3/tap.pb.h"
 #include "envoy/extensions/filters/http/tap/v3/tap.pb.validate.h"
 #include "envoy/registry/registry.h"
 
-#include "extensions/filters/http/tap/tap_config_impl.h"
-#include "extensions/filters/http/tap/tap_filter.h"
+#include "source/extensions/filters/http/tap/tap_config_impl.h"
+#include "source/extensions/filters/http/tap/tap_filter.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -17,7 +17,7 @@ class HttpTapConfigFactoryImpl : public Extensions::Common::Tap::TapConfigFactor
 public:
   // TapConfigFactory
   Extensions::Common::Tap::TapConfigSharedPtr
-  createConfigFromProto(envoy::config::tap::v3::TapConfig&& proto_config,
+  createConfigFromProto(const envoy::config::tap::v3::TapConfig& proto_config,
                         Extensions::Common::Tap::Sink* admin_streamer) override {
     return std::make_shared<HttpTapConfigImpl>(std::move(proto_config), admin_streamer);
   }

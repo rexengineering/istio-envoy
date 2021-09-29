@@ -1,9 +1,9 @@
-#include "extensions/transport_sockets/tap/tap_config_impl.h"
+#include "source/extensions/transport_sockets/tap/tap_config_impl.h"
 
 #include "envoy/data/tap/v3/transport.pb.h"
 
-#include "common/common/assert.h"
-#include "common/network/utility.h"
+#include "source/common/common/assert.h"
+#include "source/common/network/utility.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -19,6 +19,9 @@ PerSocketTapperImpl::PerSocketTapperImpl(SocketTapConfigSharedPtr config,
       connection_(connection), statuses_(config_->createMatchStatusVector()) {
   config_->rootMatcher().onNewStream(statuses_);
   if (config_->streaming() && config_->rootMatcher().matchStatus(statuses_).matches_) {
+    // TODO(mattklein123): For IP client connections, local address will not be populated until
+    // connection. We should re-emit connection information after connection so the streaming
+    // trace gets the local address.
     TapCommon::TraceWrapperPtr trace = makeTraceSegment();
     fillConnectionInfo(*trace->mutable_socket_streamed_trace_segment()->mutable_connection());
     sink_handle_->submitTrace(std::move(trace));
@@ -26,9 +29,12 @@ PerSocketTapperImpl::PerSocketTapperImpl(SocketTapConfigSharedPtr config,
 }
 
 void PerSocketTapperImpl::fillConnectionInfo(envoy::data::tap::v3::Connection& connection) {
-  Network::Utility::addressToProtobufAddress(*connection_.localAddress(),
-                                             *connection.mutable_local_address());
-  Network::Utility::addressToProtobufAddress(*connection_.remoteAddress(),
+  if (connection_.addressProvider().localAddress() != nullptr) {
+    // Local address might not be populated before a client connection is connected.
+    Network::Utility::addressToProtobufAddress(*connection_.addressProvider().localAddress(),
+                                               *connection.mutable_local_address());
+  }
+  Network::Utility::addressToProtobufAddress(*connection_.addressProvider().remoteAddress(),
                                              *connection.mutable_remote_address());
 }
 

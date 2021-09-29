@@ -40,9 +40,9 @@ TEST_P(CdnLoopFilterIntegrationTest, NoCdnLoopHeader) {
 
   auto response = sendRequestAndWaitForResponse(request_headers, 0, default_response_headers_, 0);
 
-  const auto* payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
-  ASSERT_NE(payload_entry, nullptr);
-  EXPECT_EQ(payload_entry->value().getStringView(), "cdn");
+  const auto payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
+  ASSERT_FALSE(payload_entry.empty());
+  EXPECT_EQ(payload_entry[0]->value().getStringView(), "cdn");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
 }
@@ -60,9 +60,9 @@ TEST_P(CdnLoopFilterIntegrationTest, CdnLoopHeaderWithOtherCdns) {
 
   auto response = sendRequestAndWaitForResponse(request_headers, 0, default_response_headers_, 0);
 
-  const auto* payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
-  ASSERT_NE(payload_entry, nullptr);
-  EXPECT_EQ(payload_entry->value().getStringView(), "cdn1,cdn2,cdn");
+  const auto payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
+  ASSERT_FALSE(payload_entry.empty());
+  EXPECT_EQ(payload_entry[0]->value().getStringView(), "cdn1,cdn2,cdn");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
 }
@@ -78,9 +78,9 @@ TEST_P(CdnLoopFilterIntegrationTest, MultipleCdnLoopHeaders) {
 
   auto response = sendRequestAndWaitForResponse(request_headers, 0, default_response_headers_, 0);
 
-  const auto* payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
-  ASSERT_NE(payload_entry, nullptr);
-  EXPECT_EQ(payload_entry->value().getStringView(), "cdn1,cdn2,cdn");
+  const auto payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
+  ASSERT_FALSE(payload_entry.empty());
+  EXPECT_EQ(payload_entry[0]->value().getStringView(), "cdn1,cdn2,cdn");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
 }
@@ -97,7 +97,7 @@ TEST_P(CdnLoopFilterIntegrationTest, CdnLoop0Allowed1Seen) {
                                                  {"CDN-Loop", "cdn"}};
 
   auto response = codec_client_->makeHeaderOnlyRequest(request_headers);
-  response->waitForEndStream();
+  ASSERT_TRUE(response->waitForEndStream());
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("502", response->headers().getStatusValue());
 }
@@ -114,7 +114,7 @@ TEST_P(CdnLoopFilterIntegrationTest, UnparseableHeader) {
                                                  {"CDN-Loop", "[bad-header"}};
 
   auto response = codec_client_->makeHeaderOnlyRequest(request_headers);
-  response->waitForEndStream();
+  ASSERT_TRUE(response->waitForEndStream());
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("400", response->headers().getStatusValue());
 }
@@ -132,9 +132,9 @@ TEST_P(CdnLoopFilterIntegrationTest, CdnLoop2Allowed1Seen) {
 
   auto response = sendRequestAndWaitForResponse(request_headers, 0, default_response_headers_, 0);
 
-  const auto* payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
-  ASSERT_NE(payload_entry, nullptr);
-  EXPECT_EQ(payload_entry->value().getStringView(), "cdn,cdn");
+  const auto payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
+  ASSERT_FALSE(payload_entry.empty());
+  EXPECT_EQ(payload_entry[0]->value().getStringView(), "cdn,cdn");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
 }
@@ -152,9 +152,9 @@ TEST_P(CdnLoopFilterIntegrationTest, CdnLoop2Allowed2Seen) {
 
   auto response = sendRequestAndWaitForResponse(request_headers, 0, default_response_headers_, 0);
 
-  const auto* payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
-  ASSERT_NE(payload_entry, nullptr);
-  EXPECT_EQ(payload_entry->value().getStringView(), "cdn, cdn,cdn");
+  const auto payload_entry = upstream_request_->headers().get(Http::LowerCaseString("CDN-Loop"));
+  ASSERT_FALSE(payload_entry.empty());
+  EXPECT_EQ(payload_entry[0]->value().getStringView(), "cdn, cdn,cdn");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
 }
@@ -171,17 +171,17 @@ TEST_P(CdnLoopFilterIntegrationTest, CdnLoop2Allowed3Seen) {
                                                  {"CDN-Loop", "cdn, cdn, cdn"}};
 
   auto response = codec_client_->makeHeaderOnlyRequest(request_headers);
-  response->waitForEndStream();
+  ASSERT_TRUE(response->waitForEndStream());
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("502", response->headers().getStatusValue());
 }
 
 INSTANTIATE_TEST_SUITE_P(Protocols, CdnLoopFilterIntegrationTest,
                          testing::ValuesIn(HttpProtocolIntegrationTest::getProtocolTestParams(
-                             {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2},
+                             {Http::CodecType::HTTP1, Http::CodecType::HTTP2},
                              // Upstream doesn't matter, so by testing only 1,
                              // the test is twice as fast.
-                             {FakeHttpConnection::Type::HTTP1})),
+                             {Http::CodecType::HTTP1})),
                          HttpProtocolIntegrationTest::protocolTestParamsToString);
 
 } // namespace

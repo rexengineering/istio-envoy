@@ -4,11 +4,11 @@
 #include "envoy/extensions/filters/http/cache/v3alpha/cache.pb.h"
 #include "envoy/http/header_map.h"
 
-#include "common/common/matchers.h"
-#include "common/http/header_map_impl.h"
-#include "common/http/header_utility.h"
-#include "common/http/headers.h"
-#include "common/protobuf/protobuf.h"
+#include "source/common/common/matchers.h"
+#include "source/common/http/header_map_impl.h"
+#include "source/common/http/header_utility.h"
+#include "source/common/http/headers.h"
+#include "source/common/protobuf/protobuf.h"
 
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
@@ -117,7 +117,7 @@ public:
 
   // Parses the values of a comma-delimited list as defined per
   // https://tools.ietf.org/html/rfc7230#section-7.
-  static std::vector<std::string> parseCommaDelimitedList(const Http::HeaderEntry* entry);
+  static std::vector<std::string> parseCommaDelimitedList(const Http::HeaderMap::GetResult& entry);
 };
 
 class VaryHeader {
@@ -126,7 +126,7 @@ public:
   static bool hasVary(const Http::ResponseHeaderMap& headers);
 
   // Creates a single string combining the values of the varied headers from entry_headers.
-  static std::string createVaryKey(const Http::HeaderEntry* vary_header,
+  static std::string createVaryKey(const Http::HeaderMap::GetResult& vary_header,
                                    const Http::RequestHeaderMap& entry_headers);
 
   // Parses the allow list from the Cache Config into the object's private allow_list_.

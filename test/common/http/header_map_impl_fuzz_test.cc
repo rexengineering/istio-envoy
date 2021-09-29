@@ -1,8 +1,8 @@
 #include <functional>
 
-#include "common/common/assert.h"
-#include "common/common/logger.h"
-#include "common/http/header_map_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/logger.h"
+#include "source/common/http/header_map_impl.h"
 
 #include "test/common/http/header_map_impl_fuzz.pb.h"
 #include "test/fuzz/fuzz_runner.h"
@@ -94,14 +94,14 @@ DEFINE_PROTO_FUZZER(const test::common::http::HeaderMapImplFuzzTestCase& input) 
     }
     case test::common::http::Action::kGet: {
       const auto& get = action.get();
-      const auto* header_entry =
+      const auto header_entry =
           header_map->get(Http::LowerCaseString(replaceInvalidCharacters(get.key())));
-      if (header_entry != nullptr) {
+      for (size_t i = 0; i < header_entry.size(); i++) {
         // Do some read-only stuff.
-        (void)strlen(std::string(header_entry->key().getStringView()).c_str());
-        (void)strlen(std::string(header_entry->value().getStringView()).c_str());
-        header_entry->key().empty();
-        header_entry->value().empty();
+        (void)strlen(std::string(header_entry[i]->key().getStringView()).c_str());
+        (void)strlen(std::string(header_entry[i]->value().getStringView()).c_str());
+        header_entry[i]->key().empty();
+        header_entry[i]->value().empty();
       }
       break;
     }

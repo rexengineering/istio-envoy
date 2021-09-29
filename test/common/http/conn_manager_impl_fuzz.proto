@@ -19,7 +19,7 @@ message NewStream {
 enum HeaderStatus {
   HEADER_CONTINUE = 0;
   HEADER_STOP_ITERATION = 1;
-  HEADER_CONTINUE_AND_END_STREAM = 2;
+  reserved 2;
   HEADER_STOP_ALL_ITERATION_AND_BUFFER = 3;
   HEADER_STOP_ALL_ITERATION_AND_WATERMARK = 4;
 }
@@ -42,7 +42,7 @@ message DecoderFilterCallbackAction {
     bool streaming = 2;
   }
   oneof decoder_filter_callback_action_selector {
-    // TODO(htuch): More decoder filer callback actions
+    // TODO(htuch): More decoder filter callback actions
     AddDecodedData add_decoded_data = 1;
   }
 }

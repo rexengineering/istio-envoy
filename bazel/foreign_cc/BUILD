@@ -67,21 +67,19 @@ configure_make(
         # TODO(htuch): Remove when #6084 is fixed
         "//bazel:asan_build": {"ENVOY_CONFIG_ASAN": "1"},
         "//bazel:msan_build": {"ENVOY_CONFIG_MSAN": "1"},
-        "//bazel:windows_dbg_build": {"WINDOWS_DBG_BUILD": "debug"},
         "//conditions:default": {},
     }),
     lib_source = "@com_github_moonjit_moonjit//:all",
     make_commands = [],
     out_include_dir = "include/moonjit-2.2",
-    static_libraries = select({
-        "//bazel:windows_x86_64": ["lua51.lib"],
-        "//conditions:default": ["libluajit-5.1.a"],
-    }),
+    static_libraries = ["libluajit-5.1.a"],
+    tags = ["skip_on_windows"],
 )
 
 envoy_cmake_external(
     name = "ares",
     cache_entries = {
+        "CARES_BUILD_TOOLS": "no",
         "CARES_SHARED": "no",
         "CARES_STATIC": "on",
         "CMAKE_CXX_COMPILER_FORCED": "on",
@@ -94,8 +92,8 @@ envoy_cmake_external(
         "//conditions:default": [],
     }),
     postfix_script = select({
-        "//bazel:windows_x86_64": "cp -L $EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/nameser.h $INSTALLDIR/include/nameser.h",
-        "//conditions:default": "",
+        "//bazel:windows_x86_64": "cp -L $EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/src/lib/ares_nameser.h $INSTALLDIR/include/ares_nameser.h && cp -L $EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/include/ares_dns.h $INSTALLDIR/include/ares_dns.h",
+        "//conditions:default": "cp -L $EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/include/ares_dns.h $INSTALLDIR/include/ares_dns.h",
     }),
     static_libraries = select({
         "//bazel:windows_x86_64": ["cares.lib"],
@@ -129,6 +127,8 @@ envoy_cmake_external(
         "CURL_CA_PATH": "none",
         "CMAKE_USE_OPENSSL": "off",
         "OPENSSL_ROOT_DIR": "$EXT_BUILD_DEPS",
+        # Avoid libidn2
+        "USE_LIBIDN2": "off",
         # NGHTTP2.
         "USE_NGHTTP2": "on",
         "NGHTTP2_LIBRARY": "$EXT_BUILD_DEPS/nghttp2",
@@ -138,11 +138,6 @@ envoy_cmake_external(
         "ZLIB_LIBRARY": "$EXT_BUILD_DEPS/zlib",
         "ZLIB_INCLUDE_DIR": "$EXT_BUILD_DEPS/zlib/include",
         "CMAKE_CXX_COMPILER_FORCED": "on",
-        "CMAKE_C_FLAGS_BAZEL": "-fPIC",
-        # Note we use Bazel's flags (not _RELEASE/_DEBUG CMake flags), but this toggle
-        # also works around a bug in CMP0091 logic which re-injected a badly placed -M flag.
-        # See https://github.com/bazelbuild/rules_foreign_cc/issues/426
-        "CURL_STATIC_CRT": "on",
     },
     defines = ["CURL_STATICLIB"],
     generate_crosstool_file = True,
@@ -202,6 +197,8 @@ envoy_cmake_external(
     cache_entries = {
         # Disable both: BUILD and INCLUDE, since some of the INCLUDE
         # targets build code instead of only generating build files.
+        "LLVM_BUILD_BENCHMARKS": "off",
+        "LLVM_INCLUDE_BENCHMARKS": "off",
         "LLVM_BUILD_DOCS": "off",
         "LLVM_INCLUDE_DOCS": "off",
         "LLVM_BUILD_EXAMPLES": "off",
@@ -215,6 +212,7 @@ envoy_cmake_external(
         "LLVM_INCLUDE_TOOLS": "off",
         "LLVM_BUILD_UTILS": "off",
         "LLVM_INCLUDE_UTILS": "off",
+        "LLVM_ENABLE_IDE": "off",
         "LLVM_ENABLE_LIBEDIT": "off",
         "LLVM_ENABLE_LIBXML2": "off",
         "LLVM_ENABLE_TERMINFO": "off",
@@ -235,69 +233,63 @@ envoy_cmake_external(
     lib_source = "@org_llvm_llvm//:all",
     static_libraries = select({
         "//conditions:default": [
-            # Order from llvm-config --libnames.
+            # Order from llvm-config --libnames asmparser core debuginfodwarf
+            # engine lto mcparser mirparser orcjit passes runtimedyld
+            # support x86asmparser x86desc
+            "libLLVMOrcJIT.a",
+            "libLLVMOrcError.a",
+            "libLLVMJITLink.a",
+            "libLLVMMIRParser.a",
             "libLLVMLTO.a",
             "libLLVMPasses.a",
             "libLLVMObjCARCOpts.a",
-            "libLLVMSymbolize.a",
-            "libLLVMDebugInfoPDB.a",
-            "libLLVMDebugInfoDWARF.a",
-            "libLLVMFuzzMutate.a",
-            "libLLVMTableGen.a",
-            "libLLVMDlltoolDriver.a",
-            "libLLVMLineEditor.a",
-            "libLLVMOrcJIT.a",
-            "libLLVMCoverage.a",
-            "libLLVMMIRParser.a",
-            "libLLVMObjectYAML.a",
-            "libLLVMLibDriver.a",
-            "libLLVMOption.a",
-            "libLLVMWindowsManifest.a",
-            "libLLVMX86Disassembler.a",
-            "libLLVMX86AsmParser.a",
-            "libLLVMX86CodeGen.a",
-            "libLLVMGlobalISel.a",
-            "libLLVMSelectionDAG.a",
-            "libLLVMAsmPrinter.a",
-            "libLLVMDebugInfoCodeView.a",
-            "libLLVMDebugInfoMSF.a",
-            "libLLVMX86Desc.a",
-            "libLLVMMCDisassembler.a",
-            "libLLVMX86Info.a",
-            "libLLVMX86Utils.a",
-            "libLLVMMCJIT.a",
-            "libLLVMInterpreter.a",
-            "libLLVMExecutionEngine.a",
-            "libLLVMRuntimeDyld.a",
-            "libLLVMCodeGen.a",
-            "libLLVMTarget.a",
-            "libLLVMCoroutines.a",
             "libLLVMipo.a",
             "libLLVMInstrumentation.a",
             "libLLVMVectorize.a",
-            "libLLVMScalarOpts.a",
             "libLLVMLinker.a",
             "libLLVMIRReader.a",
-            "libLLVMAsmParser.a",
+            "libLLVMX86Disassembler.a",
+            "libLLVMX86AsmParser.a",
+            "libLLVMX86CodeGen.a",
+            "libLLVMCFGuard.a",
+            "libLLVMGlobalISel.a",
+            "libLLVMSelectionDAG.a",
+            "libLLVMAsmPrinter.a",
+            "libLLVMCodeGen.a",
+            "libLLVMScalarOpts.a",
             "libLLVMInstCombine.a",
+            "libLLVMAggressiveInstCombine.a",
             "libLLVMTransformUtils.a",
             "libLLVMBitWriter.a",
+            "libLLVMX86Desc.a",
+            "libLLVMMCDisassembler.a",
+            "libLLVMX86Utils.a",
+            "libLLVMX86Info.a",
+            "libLLVMMCJIT.a",
+            "libLLVMExecutionEngine.a",
+            "libLLVMTarget.a",
             "libLLVMAnalysis.a",
             "libLLVMProfileData.a",
+            "libLLVMRuntimeDyld.a",
+            "libLLVMDebugInfoDWARF.a",
             "libLLVMObject.a",
+            "libLLVMTextAPI.a",
             "libLLVMMCParser.a",
             "libLLVMMC.a",
+            "libLLVMDebugInfoCodeView.a",
+            "libLLVMDebugInfoMSF.a",
             "libLLVMBitReader.a",
-            "libLLVMBitstreamReader.a",
+            "libLLVMAsmParser.a",
             "libLLVMCore.a",
+            "libLLVMRemarks.a",
+            "libLLVMBitstreamReader.a",
             "libLLVMBinaryFormat.a",
             "libLLVMSupport.a",
             "libLLVMDemangle.a",
-            "libLLVMRemarks.a",
-            "libLLVMCFGuard.a",
-            "libLLVMTextAPI.a",
         ],
     }),
+    tags = ["skip_on_windows"],
+    alwayslink = True,
 )
 
 envoy_cmake_external(
@@ -320,18 +312,35 @@ envoy_cmake_external(
 )
 
 envoy_cmake_external(
+    name = "wamr",
+    cache_entries = {
+        "LLVM_DIR": "$EXT_BUILD_DEPS/copy_llvm/llvm/lib/cmake/llvm",
+        "WAMR_BUILD_INTERP": "0",
+        "WAMR_BUILD_JIT": "1",
+        "WAMR_BUILD_AOT": "1",
+        "WAMR_BUILD_SIMD": "0",
+        "WAMR_BUILD_MULTI_MODULE": "1",
+        "WAMR_BUILD_LIBC_WASI": "0",
+        "WAMR_BUILD_TAIL_CALL": "1",
+    },
+    lib_source = "@com_github_wamr//:all",
+    static_libraries = ["libvmlib.a"],
+    tags = ["skip_on_windows"],
+    deps = [":llvm"],
+)
+
+envoy_cmake_external(
     name = "wavm",
     binaries = ["wavm"],
     cache_entries = {
         "LLVM_DIR": "$EXT_BUILD_DEPS/copy_llvm/llvm/lib/cmake/llvm",
         "WAVM_ENABLE_STATIC_LINKING": "on",
         "WAVM_ENABLE_RELEASE_ASSERTS": "on",
-        "WAVM_ENABLE_UNWIND": "no",
+        "WAVM_ENABLE_UNWIND": "on",
         # Workaround for the issue with statically linked libstdc++
         # using -l:libstdc++.a.
         "CMAKE_CXX_FLAGS": "-lstdc++ -Wno-unused-command-line-argument",
     },
-    defines = ["ENVOY_WASM_WAVM"],
     env_vars = {
         # Workaround for the -DDEBUG flag added in fastbuild on macOS,
         # which conflicts with DEBUG macro used in LLVM.
@@ -343,8 +352,10 @@ envoy_cmake_external(
     static_libraries = select({
         "//conditions:default": [
             "libWAVM.a",
+            "libWAVMUnwind.a",
         ],
     }),
+    tags = ["skip_on_windows"],
     deps = [":llvm"],
 )
 

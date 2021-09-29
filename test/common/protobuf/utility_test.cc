@@ -8,14 +8,18 @@
 #include "envoy/config/cluster/v3/filter.pb.h"
 #include "envoy/config/cluster/v3/filter.pb.validate.h"
 #include "envoy/config/core/v3/base.pb.h"
+#include "envoy/config/health_checker/redis/v2/redis.pb.h"
+#include "envoy/config/health_checker/redis/v2/redis.pb.validate.h"
+#include "envoy/extensions/health_checkers/redis/v3/redis.pb.h"
+#include "envoy/extensions/health_checkers/redis/v3/redis.pb.validate.h"
 #include "envoy/type/v3/percent.pb.h"
 
-#include "common/common/base64.h"
-#include "common/config/api_version.h"
-#include "common/protobuf/message_validator_impl.h"
-#include "common/protobuf/protobuf.h"
-#include "common/protobuf/utility.h"
-#include "common/runtime/runtime_impl.h"
+#include "source/common/common/base64.h"
+#include "source/common/config/api_version.h"
+#include "source/common/protobuf/message_validator_impl.h"
+#include "source/common/protobuf/protobuf.h"
+#include "source/common/protobuf/utility.h"
+#include "source/common/runtime/runtime_impl.h"
 
 #include "test/common/stats/stat_test_utility.h"
 #include "test/mocks/init/mocks.h"
@@ -26,6 +30,7 @@
 #include "test/proto/sensitive.pb.h"
 #include "test/test_common/environment.h"
 #include "test/test_common/logging.h"
+#include "test/test_common/test_runtime.h"
 #include "test/test_common/utility.h"
 
 #include "absl/container/node_hash_set.h"
@@ -36,34 +41,34 @@ using namespace std::chrono_literals;
 
 namespace Envoy {
 
-class RuntimeStatsHelper {
+using testing::HasSubstr;
+
+class RuntimeStatsHelper : public TestScopedRuntime {
 public:
-  RuntimeStatsHelper()
-      : api_(Api::createApiForTest(store_)),
-        runtime_deprecated_feature_use_(store_.counter("runtime.deprecated_feature_use")),
+  RuntimeStatsHelper(bool allow_deprecated_v2_api = false)
+      : runtime_deprecated_feature_use_(store_.counter("runtime.deprecated_feature_use")),
         deprecated_feature_seen_since_process_start_(
             store_.gauge("runtime.deprecated_feature_seen_since_process_start",
                          Stats::Gauge::ImportMode::NeverImport)) {
-    envoy::config::bootstrap::v3::LayeredRuntime config;
-    config.add_layers()->mutable_admin_layer();
-    loader_ = std::make_unique<Runtime::ScopedLoaderSingleton>(
-        Runtime::LoaderPtr{new Runtime::LoaderImpl(dispatcher_, tls_, config, local_info_, store_,
-                                                   generator_, validation_visitor_, *api_)});
+    if (allow_deprecated_v2_api) {
+      Runtime::LoaderSingleton::getExisting()->mergeValues({
+          {"envoy.test_only.broken_in_production.enable_deprecated_v2_api", "true"},
+          {"envoy.features.enable_all_deprecated_features", "true"},
+      });
+    }
   }
 
-  Event::MockDispatcher dispatcher_;
-  NiceMock<ThreadLocal::MockInstance> tls_;
-  Stats::TestUtil::TestStore store_;
-  Random::MockRandomGenerator generator_;
-  Api::ApiPtr api_;
-  std::unique_ptr<Runtime::ScopedLoaderSingleton> loader_;
   Stats::Counter& runtime_deprecated_feature_use_;
   Stats::Gauge& deprecated_feature_seen_since_process_start_;
-  NiceMock<LocalInfo::MockLocalInfo> local_info_;
-  NiceMock<ProtobufMessage::MockValidationVisitor> validation_visitor_;
 };
 
 class ProtobufUtilityTest : public testing::Test, protected RuntimeStatsHelper {};
+// TODO(htuch): During/before the v2 removal, cleanup the various examples that explicitly refer to
+// v2 API protos and replace with upgrade examples not tie to the concrete API.
+class ProtobufV2ApiUtilityTest : public testing::Test, protected RuntimeStatsHelper {
+public:
+  ProtobufV2ApiUtilityTest() : RuntimeStatsHelper(true) {}
+};
 
 TEST_F(ProtobufUtilityTest, ConvertPercentNaNDouble) {
   envoy::config::cluster::v3::Cluster::CommonLbConfig common_config_;
@@ -251,6 +256,36 @@ TEST_F(ProtobufUtilityTest, DowncastAndValidateUnknownFieldsNested) {
                             "unknown field set {1}) has unknown fields");
 }
 
+TEST_F(ProtobufUtilityTest, JsonConvertAnyUnknownMessageType) {
+  ProtobufWkt::Any source_any;
+  source_any.set_type_url("type.googleapis.com/bad.type.url");
+  source_any.set_value("asdf");
+  auto status = MessageUtil::getJsonStringFromMessage(source_any, true).status();
+  EXPECT_FALSE(status.ok());
+  EXPECT_THAT(status.ToString(), testing::HasSubstr("bad.type.url"));
+}
+
+TEST_F(ProtobufUtilityTest, JsonConvertKnownGoodMessage) {
+  ProtobufWkt::Any source_any;
+  source_any.PackFrom(envoy::config::bootstrap::v3::Bootstrap::default_instance());
+  EXPECT_THAT(MessageUtil::getJsonStringFromMessageOrDie(source_any, true),
+              testing::HasSubstr("@type"));
+}
+
+TEST_F(ProtobufUtilityTest, JsonConvertOrErrorAnyWithUnknownMessageType) {
+  ProtobufWkt::Any source_any;
+  source_any.set_type_url("type.googleapis.com/bad.type.url");
+  source_any.set_value("asdf");
+  EXPECT_THAT(MessageUtil::getJsonStringFromMessageOrError(source_any), HasSubstr("unknown type"));
+}
+
+TEST_F(ProtobufUtilityTest, JsonConvertOrDieAnyWithUnknownMessageType) {
+  ProtobufWkt::Any source_any;
+  source_any.set_type_url("type.googleapis.com/bad.type.url");
+  source_any.set_value("asdf");
+  EXPECT_DEATH(MessageUtil::getJsonStringFromMessageOrDie(source_any), "bad.type.url");
+}
+
 TEST_F(ProtobufUtilityTest, LoadBinaryProtoFromFile) {
   envoy::config::bootstrap::v3::Bootstrap bootstrap;
   bootstrap.mutable_cluster_manager()
@@ -267,19 +302,22 @@ TEST_F(ProtobufUtilityTest, LoadBinaryProtoFromFile) {
   EXPECT_TRUE(TestUtility::protoEqual(bootstrap, proto_from_file));
 }
 
-TEST_F(ProtobufUtilityTest, DEPRECATED_FEATURE_TEST(LoadBinaryV2ProtoFromFile)) {
-  // Allow the use of v2.Bootstrap.runtime.
-  Runtime::LoaderSingleton::getExisting()->mergeValues(
-      {{"envoy.deprecated_features:envoy.config.bootstrap.v2.Bootstrap.runtime", "True "}});
-  envoy::config::bootstrap::v2::Bootstrap bootstrap;
-  bootstrap.mutable_runtime()->set_symlink_root("/");
-
+// Verify that a config with a deprecated field can be loaded with runtime global override.
+TEST_F(ProtobufUtilityTest, DEPRECATED_FEATURE_TEST(LoadBinaryGlobalOverrideProtoFromFile)) {
+  const std::string bootstrap_yaml = R"EOF(
+layered_runtime:
+  layers:
+  - name: static_layer
+    static_layer:
+      envoy.features.enable_all_deprecated_features: true
+watchdog: { miss_timeout: 1s })EOF";
   const std::string filename =
-      TestEnvironment::writeStringToFileForTest("proto.pb", bootstrap.SerializeAsString());
+      TestEnvironment::writeStringToFileForTest("proto.yaml", bootstrap_yaml);
 
   envoy::config::bootstrap::v3::Bootstrap proto_from_file;
   TestUtility::loadFromFile(filename, proto_from_file, *api_);
-  EXPECT_EQ("/", proto_from_file.hidden_envoy_deprecated_runtime().symlink_root());
+  TestUtility::validate(proto_from_file);
+  EXPECT_TRUE(proto_from_file.has_watchdog());
   EXPECT_GT(runtime_deprecated_feature_use_.value(), 0);
 }
 
@@ -353,7 +391,7 @@ TEST_F(ProtobufUtilityTest, LoadJsonFromFileNoBoosting) {
   EXPECT_TRUE(TestUtility::protoEqual(bootstrap, proto_from_file));
 }
 
-TEST_F(ProtobufUtilityTest, DEPRECATED_FEATURE_TEST(LoadV2TextProtoFromFile)) {
+TEST_F(ProtobufV2ApiUtilityTest, DEPRECATED_FEATURE_TEST(LoadV2TextProtoFromFile)) {
   API_NO_BOOST(envoy::config::bootstrap::v2::Bootstrap) bootstrap;
   bootstrap.mutable_node()->set_build_version("foo");
 
@@ -948,6 +986,19 @@ type_url: type.googleapis.com/envoy.test.Sensitive
   EXPECT_TRUE(TestUtility::protoEqual(expected, actual));
 }
 
+TEST_F(ProtobufUtilityTest, RedactTypedStructWithNoTypeUrl) {
+  udpa::type::v1::TypedStruct actual;
+  TestUtility::loadFromYaml(R"EOF(
+value:
+  sensitive_string: This field is sensitive, but we have no way of knowing.
+)EOF",
+                            actual);
+
+  udpa::type::v1::TypedStruct expected = actual;
+  MessageUtil::redact(actual);
+  EXPECT_TRUE(TestUtility::protoEqual(expected, actual));
+}
+
 // Messages packed into `TypedStruct` with unknown type URLs are skipped.
 TEST_F(ProtobufUtilityTest, RedactTypedStructWithUnknownTypeUrl) {
   udpa::type::v1::TypedStruct actual;
@@ -960,6 +1011,20 @@ value:
 
   udpa::type::v1::TypedStruct expected = actual;
   MessageUtil::redact(actual);
+  EXPECT_TRUE(TestUtility::protoEqual(expected, actual));
+}
+
+TEST_F(ProtobufUtilityTest, RedactEmptyTypeUrlTypedStruct) {
+  udpa::type::v1::TypedStruct actual;
+  udpa::type::v1::TypedStruct expected = actual;
+  MessageUtil::redact(actual);
+  EXPECT_TRUE(TestUtility::protoEqual(expected, actual));
+}
+
+TEST_F(ProtobufUtilityTest, RedactEmptyTypeUrlAny) {
+  ProtobufWkt::Any actual;
+  MessageUtil::redact(actual);
+  ProtobufWkt::Any expected = actual;
   EXPECT_TRUE(TestUtility::protoEqual(expected, actual));
 }
 
@@ -1147,10 +1212,19 @@ TEST_F(ProtobufUtilityTest, ValueUtilLoadFromYamlObject) {
             "struct_value { fields { key: \"foo\" value { string_value: \"bar\" } } }");
 }
 
-TEST_F(ProtobufUtilityTest, ValueUtilLoadFromYamlException) {
+TEST_F(ProtobufUtilityTest, ValueUtilLoadFromYamlObjectWithIgnoredEntries) {
+  EXPECT_EQ(ValueUtil::loadFromYaml("!ignore foo: bar\nbaz: qux").ShortDebugString(),
+            "struct_value { fields { key: \"baz\" value { string_value: \"qux\" } } }");
+}
+
+TEST(LoadFromYamlExceptionTest, BadConversion) {
   std::string bad_yaml = R"EOF(
 admin:
-  access_log_path: /dev/null
+  access_log:
+  - name: envoy.access_loggers.file
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+      path: /dev/null
   address:
     socket_address:
       address: {{ ntop_ip_loopback_address }}
@@ -1158,6 +1232,20 @@ admin:
 )EOF";
 
   EXPECT_THROW_WITH_REGEX(ValueUtil::loadFromYaml(bad_yaml), EnvoyException, "bad conversion");
+  EXPECT_THROW_WITHOUT_REGEX(ValueUtil::loadFromYaml(bad_yaml), EnvoyException,
+                             "Unexpected YAML exception");
+}
+
+TEST(LoadFromYamlExceptionTest, ParserException) {
+  std::string bad_yaml = R"EOF(
+systemLog:
+    destination: file
+    path:"G:\file\path"
+storage:
+    dbPath:"G:\db\data"
+)EOF";
+
+  EXPECT_THROW_WITH_REGEX(ValueUtil::loadFromYaml(bad_yaml), EnvoyException, "illegal map value");
   EXPECT_THROW_WITHOUT_REGEX(ValueUtil::loadFromYaml(bad_yaml), EnvoyException,
                              "Unexpected YAML exception");
 }
@@ -1195,6 +1283,29 @@ TEST_F(ProtobufUtilityTest, HashedValueStdHash) {
   EXPECT_NE(set.find(hv3), set.end());
 }
 
+TEST_F(ProtobufUtilityTest, AnyBytes) {
+  {
+    ProtobufWkt::StringValue source;
+    source.set_value("abc");
+    ProtobufWkt::Any source_any;
+    source_any.PackFrom(source);
+    EXPECT_EQ(MessageUtil::anyToBytes(source_any), "abc");
+  }
+  {
+    ProtobufWkt::BytesValue source;
+    source.set_value("\x01\x02\x03");
+    ProtobufWkt::Any source_any;
+    source_any.PackFrom(source);
+    EXPECT_EQ(MessageUtil::anyToBytes(source_any), "\x01\x02\x03");
+  }
+  {
+    envoy::config::cluster::v3::Filter filter;
+    ProtobufWkt::Any source_any;
+    source_any.PackFrom(filter);
+    EXPECT_EQ(MessageUtil::anyToBytes(source_any), source_any.value());
+  }
+}
+
 // MessageUtility::anyConvert() with the wrong type throws.
 TEST_F(ProtobufUtilityTest, AnyConvertWrongType) {
   ProtobufWkt::Duration source_duration;
@@ -1217,7 +1328,7 @@ TEST_F(ProtobufUtilityTest, AnyConvertAndValidateFailedValidation) {
 }
 
 // MessageUtility::unpackTo() with the wrong type throws.
-TEST_F(ProtobufUtilityTest, UnpackToWrongType) {
+TEST_F(ProtobufV2ApiUtilityTest, UnpackToWrongType) {
   ProtobufWkt::Duration source_duration;
   source_duration.set_seconds(42);
   ProtobufWkt::Any source_any;
@@ -1251,7 +1362,7 @@ TEST_F(ProtobufUtilityTest, UnpackToSameVersion) {
 }
 
 // MessageUtility::unpackTo() with API message works across version.
-TEST_F(ProtobufUtilityTest, UnpackToNextVersion) {
+TEST_F(ProtobufV2ApiUtilityTest, UnpackToNextVersion) {
   API_NO_BOOST(envoy::api::v2::Cluster) source;
   source.set_drain_connections_on_host_removal(true);
   ProtobufWkt::Any source_any;
@@ -1262,8 +1373,21 @@ TEST_F(ProtobufUtilityTest, UnpackToNextVersion) {
   EXPECT_TRUE(dst.ignore_health_on_host_removal());
 }
 
+// MessageUtility::unpackTo() with API message works across version and doesn't register
+// deprecations for allowlisted v2 protos.
+TEST_F(ProtobufV2ApiUtilityTest, UnpackToNextVersionV2Allowed) {
+  API_NO_BOOST(envoy::config::health_checker::redis::v2::Redis) source;
+  source.set_key("foo");
+  ProtobufWkt::Any source_any;
+  source_any.PackFrom(source);
+  API_NO_BOOST(envoy::extensions::health_checkers::redis::v3::Redis) dst;
+  MessageUtil::unpackTo(source_any, dst);
+  EXPECT_EQ(runtime_deprecated_feature_use_.value(), 0);
+  EXPECT_EQ(dst.key(), "foo");
+}
+
 // Validate warning messages on v2 upgrades.
-TEST_F(ProtobufUtilityTest, V2UpgradeWarningLogs) {
+TEST_F(ProtobufV2ApiUtilityTest, V2UpgradeWarningLogs) {
   API_NO_BOOST(envoy::config::cluster::v3::Cluster) dst;
   // First attempt works.
   EXPECT_LOG_CONTAINS("warn", "Configuration does not parse cleanly as v3",
@@ -1278,7 +1402,8 @@ TEST_F(ProtobufUtilityTest, V2UpgradeWarningLogs) {
   EXPECT_LOG_CONTAINS("warn", "Configuration does not parse cleanly as v3",
                       MessageUtil::loadFromJson("{drain_connections_on_host_removal: false}", dst,
                                                 ProtobufMessage::getNullValidationVisitor()));
-  // This is kind of terrible, but it's hard to do dependency injection at onVersionUpgradeWarn().
+  // This is kind of terrible, but it's hard to do dependency injection at
+  // onVersionUpgradeDeprecation().
   std::this_thread::sleep_for(5s); // NOLINT
   // We can log the original warning again.
   EXPECT_LOG_CONTAINS("warn", "Configuration does not parse cleanly as v3",
@@ -1336,7 +1461,7 @@ TEST_F(ProtobufUtilityTest, LoadFromJsonNoBoosting) {
 }
 
 // MessageUtility::loadFromJson() with API message works across version.
-TEST_F(ProtobufUtilityTest, LoadFromJsonNextVersion) {
+TEST_F(ProtobufV2ApiUtilityTest, LoadFromJsonNextVersion) {
   {
     API_NO_BOOST(envoy::config::cluster::v3::Cluster) dst;
     MessageUtil::loadFromJson("{use_tcp_for_dns_lookups: true}", dst,
@@ -1401,7 +1526,7 @@ TEST_F(ProtobufUtilityTest, JsonConvertCamelSnake) {
   ProtobufWkt::Struct json;
   TestUtility::jsonConvert(bootstrap, json);
   // Verify we can round-trip. This didn't cause the #3665 regression, but useful as a sanity check.
-  TestUtility::loadFromJson(MessageUtil::getJsonStringFromMessage(json, false), bootstrap);
+  TestUtility::loadFromJson(MessageUtil::getJsonStringFromMessageOrDie(json, false), bootstrap);
   // Verify we don't do a camel case conversion.
   EXPECT_EQ("foo", json.fields()
                        .at("cluster_manager")
@@ -1482,6 +1607,13 @@ flags_path: foo)EOF";
   EXPECT_EQ(expected_yaml, "\n" + MessageUtil::getYamlStringFromMessage(bootstrap, true, false));
 }
 
+TEST_F(ProtobufUtilityTest, GetYamlStringFromProtoInvalidAny) {
+  ProtobufWkt::Any source_any;
+  source_any.set_type_url("type.googleapis.com/bad.type.url");
+  source_any.set_value("asdf");
+  EXPECT_THROW(MessageUtil::getYamlStringFromMessage(source_any, true), EnvoyException);
+}
+
 TEST(DurationUtilTest, OutOfRange) {
   {
     ProtobufWkt::Duration duration;
@@ -1543,7 +1675,7 @@ TEST_P(DeprecatedFieldsTest, NoErrorWhenDeprecatedFieldsUnused) {
   EXPECT_EQ(0, deprecated_feature_seen_since_process_start_.value());
 }
 
-TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(IndividualFieldDeprecated)) {
+TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(IndividualFieldDeprecatedEmitsError)) {
   envoy::test::deprecation_test::Base base;
   base.set_is_deprecated("foo");
   // Non-fatal checks for a deprecated field should log rather than throw an exception.
@@ -1552,6 +1684,21 @@ TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(IndividualFieldDeprecated))
                       checkForDeprecation(base));
   EXPECT_EQ(1, runtime_deprecated_feature_use_.value());
   EXPECT_EQ(1, deprecated_feature_seen_since_process_start_.value());
+}
+
+TEST_P(DeprecatedFieldsTest, IndividualFieldDeprecatedEmitsCrash) {
+  envoy::test::deprecation_test::Base base;
+  base.set_is_deprecated("foo");
+  // Non-fatal checks for a deprecated field should throw an exception if the
+  // runtime flag is enabled..
+  Runtime::LoaderSingleton::getExisting()->mergeValues({
+      {"envoy.features.fail_on_any_deprecated_feature", "true"},
+  });
+  EXPECT_THROW_WITH_REGEX(
+      checkForDeprecation(base), Envoy::ProtobufMessage::DeprecatedProtoFieldException,
+      "Using deprecated option 'envoy.test.deprecation_test.Base.is_deprecated'");
+  EXPECT_EQ(0, runtime_deprecated_feature_use_.value());
+  EXPECT_EQ(0, deprecated_feature_seen_since_process_start_.value());
 }
 
 // Use of a deprecated and disallowed field should result in an exception.
@@ -1589,6 +1736,31 @@ TEST_P(DeprecatedFieldsTest,
   EXPECT_EQ(1, runtime_deprecated_feature_use_.value());
 }
 
+// Test that a deprecated field is allowed with runtime global override.
+TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(IndividualFieldDisallowedWithGlobalOverride)) {
+  envoy::test::deprecation_test::Base base;
+  base.set_is_deprecated_fatal("foo");
+
+  // Make sure this is set up right.
+  EXPECT_THROW_WITH_REGEX(
+      checkForDeprecation(base), Envoy::ProtobufMessage::DeprecatedProtoFieldException,
+      "Using deprecated option 'envoy.test.deprecation_test.Base.is_deprecated_fatal'");
+  // The config will be rejected, so the feature will not be used.
+  EXPECT_EQ(0, runtime_deprecated_feature_use_.value());
+
+  // Now create a new snapshot with this all features allowed.
+  Runtime::LoaderSingleton::getExisting()->mergeValues(
+      {{"envoy.features.enable_all_deprecated_features", "true"}});
+
+  // Now the same deprecation check should only trigger a warning.
+  EXPECT_LOG_CONTAINS(
+      "warning",
+      "Using runtime overrides to continue using now fatal-by-default deprecated option "
+      "'envoy.test.deprecation_test.Base.is_deprecated_fatal'",
+      checkForDeprecation(base));
+  EXPECT_EQ(1, runtime_deprecated_feature_use_.value());
+}
+
 TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(DisallowViaRuntime)) {
   envoy::test::deprecation_test::Base base;
   base.set_is_deprecated("foo");
@@ -1601,6 +1773,16 @@ TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(DisallowViaRuntime)) {
   // Now create a new snapshot with this feature disallowed.
   Runtime::LoaderSingleton::getExisting()->mergeValues(
       {{"envoy.deprecated_features:envoy.test.deprecation_test.Base.is_deprecated", " false"}});
+
+  EXPECT_THROW_WITH_REGEX(
+      checkForDeprecation(base), Envoy::ProtobufMessage::DeprecatedProtoFieldException,
+      "Using deprecated option 'envoy.test.deprecation_test.Base.is_deprecated'");
+  EXPECT_EQ(1, runtime_deprecated_feature_use_.value());
+
+  // Verify that even when the enable_all_deprecated_features is enabled the
+  // feature is disallowed.
+  Runtime::LoaderSingleton::getExisting()->mergeValues(
+      {{"envoy.features.enable_all_deprecated_features", "true"}});
 
   EXPECT_THROW_WITH_REGEX(
       checkForDeprecation(base), Envoy::ProtobufMessage::DeprecatedProtoFieldException,
@@ -1714,6 +1896,15 @@ TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(RuntimeOverrideEnumDefault)
   EXPECT_THROW_WITH_REGEX(checkForDeprecation(base),
                           Envoy::ProtobufMessage::DeprecatedProtoFieldException,
                           "Using the default now-deprecated value DEPRECATED_DEFAULT");
+
+  // Verify that even when the enable_all_deprecated_features is enabled the
+  // enum is disallowed.
+  Runtime::LoaderSingleton::getExisting()->mergeValues(
+      {{"envoy.features.enable_all_deprecated_features", "true"}});
+
+  EXPECT_THROW_WITH_REGEX(checkForDeprecation(base),
+                          Envoy::ProtobufMessage::DeprecatedProtoFieldException,
+                          "Using the default now-deprecated value DEPRECATED_DEFAULT");
 }
 
 // Make sure the runtime overrides for allowing fatal enums work.
@@ -1727,6 +1918,27 @@ TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(FatalEnum)) {
 
   Runtime::LoaderSingleton::getExisting()->mergeValues(
       {{"envoy.deprecated_features:envoy.test.deprecation_test.Base.DEPRECATED_FATAL", "true"}});
+
+  EXPECT_LOG_CONTAINS(
+      "warning",
+      "Using runtime overrides to continue using now fatal-by-default deprecated value "
+      "DEPRECATED_FATAL for enum "
+      "'envoy.test.deprecation_test.Base.InnerMessageWithDeprecationEnum.deprecated_enum' "
+      "from file deprecated.proto. This enum value will be removed from Envoy soon.",
+      checkForDeprecation(base));
+}
+
+// Make sure the runtime global override for allowing fatal enums work.
+TEST_P(DeprecatedFieldsTest, DEPRECATED_FEATURE_TEST(FatalEnumGlobalOverride)) {
+  envoy::test::deprecation_test::Base base;
+  base.mutable_enum_container()->set_deprecated_enum(
+      envoy::test::deprecation_test::Base::DEPRECATED_FATAL);
+  EXPECT_THROW_WITH_REGEX(checkForDeprecation(base),
+                          Envoy::ProtobufMessage::DeprecatedProtoFieldException,
+                          "Using deprecated value DEPRECATED_FATAL");
+
+  Runtime::LoaderSingleton::getExisting()->mergeValues(
+      {{"envoy.features.enable_all_deprecated_features", "true"}});
 
   EXPECT_LOG_CONTAINS(
       "warning",
@@ -1818,13 +2030,118 @@ INSTANTIATE_TEST_SUITE_P(TimestampUtilTestAcrossRange, TimestampUtilTest,
                                            ));
 
 TEST(StatusCode, Strings) {
-  int last_code = static_cast<int>(ProtobufUtil::error::UNAUTHENTICATED);
+  int last_code = static_cast<int>(ProtobufUtil::StatusCode::kUnauthenticated);
   for (int i = 0; i < last_code; ++i) {
-    EXPECT_NE(MessageUtil::CodeEnumToString(static_cast<ProtobufUtil::error::Code>(i)), "");
+    EXPECT_NE(MessageUtil::codeEnumToString(static_cast<ProtobufUtil::StatusCode>(i)), "");
   }
   ASSERT_EQ("UNKNOWN",
-            MessageUtil::CodeEnumToString(static_cast<ProtobufUtil::error::Code>(last_code + 1)));
-  ASSERT_EQ("OK", MessageUtil::CodeEnumToString(ProtobufUtil::error::OK));
+            MessageUtil::codeEnumToString(static_cast<ProtobufUtil::StatusCode>(last_code + 1)));
+  ASSERT_EQ("OK", MessageUtil::codeEnumToString(ProtobufUtil::StatusCode::kOk));
+}
+
+TEST(TypeUtilTest, TypeUrlHelperFunction) {
+  EXPECT_EQ("envoy.config.filter.http.ip_tagging.v2.IPTagging",
+            TypeUtil::typeUrlToDescriptorFullName(
+                "type.googleapis.com/envoy.config.filter.http.ip_tagging.v2.IPTagging"));
+  EXPECT_EQ(
+      "type.googleapis.com/envoy.config.filter.http.ip_tagging.v2.IPTagging",
+      TypeUtil::descriptorFullNameToTypeUrl("envoy.config.filter.http.ip_tagging.v2.IPTagging"));
+}
+
+class StructUtilTest : public ProtobufUtilityTest {
+protected:
+  ProtobufWkt::Struct updateSimpleStruct(const ProtobufWkt::Value& v0,
+                                         const ProtobufWkt::Value& v1) {
+    ProtobufWkt::Struct obj, with;
+    (*obj.mutable_fields())["key"] = v0;
+    (*with.mutable_fields())["key"] = v1;
+    StructUtil::update(obj, with);
+    EXPECT_EQ(obj.fields().size(), 1);
+    return obj;
+  }
+};
+
+TEST_F(StructUtilTest, StructUtilUpdateScalars) {
+  {
+    const auto obj = updateSimpleStruct(ValueUtil::stringValue("v0"), ValueUtil::stringValue("v1"));
+    EXPECT_EQ(obj.fields().at("key").string_value(), "v1");
+  }
+
+  {
+    const auto obj = updateSimpleStruct(ValueUtil::numberValue(0), ValueUtil::numberValue(1));
+    EXPECT_EQ(obj.fields().at("key").number_value(), 1);
+  }
+
+  {
+    const auto obj = updateSimpleStruct(ValueUtil::boolValue(false), ValueUtil::boolValue(true));
+    EXPECT_EQ(obj.fields().at("key").bool_value(), true);
+  }
+
+  {
+    const auto obj = updateSimpleStruct(ValueUtil::nullValue(), ValueUtil::nullValue());
+    EXPECT_EQ(obj.fields().at("key").kind_case(), ProtobufWkt::Value::KindCase::kNullValue);
+  }
+}
+
+TEST_F(StructUtilTest, StructUtilUpdateDifferentKind) {
+  {
+    const auto obj = updateSimpleStruct(ValueUtil::stringValue("v0"), ValueUtil::numberValue(1));
+    auto& val = obj.fields().at("key");
+    EXPECT_EQ(val.kind_case(), ProtobufWkt::Value::KindCase::kNumberValue);
+    EXPECT_EQ(val.number_value(), 1);
+  }
+
+  {
+    const auto obj =
+        updateSimpleStruct(ValueUtil::structValue(MessageUtil::keyValueStruct("subkey", "v0")),
+                           ValueUtil::stringValue("v1"));
+    auto& val = obj.fields().at("key");
+    EXPECT_EQ(val.kind_case(), ProtobufWkt::Value::KindCase::kStringValue);
+    EXPECT_EQ(val.string_value(), "v1");
+  }
+}
+
+TEST_F(StructUtilTest, StructUtilUpdateList) {
+  ProtobufWkt::Struct obj, with;
+  auto& list = *(*obj.mutable_fields())["key"].mutable_list_value();
+  list.add_values()->set_string_value("v0");
+
+  auto& with_list = *(*with.mutable_fields())["key"].mutable_list_value();
+  with_list.add_values()->set_number_value(1);
+  const auto v2 = MessageUtil::keyValueStruct("subkey", "str");
+  *with_list.add_values()->mutable_struct_value() = v2;
+
+  StructUtil::update(obj, with);
+  ASSERT_THAT(obj.fields().size(), 1);
+  const auto& list_vals = list.values();
+  EXPECT_TRUE(ValueUtil::equal(list_vals[0], ValueUtil::stringValue("v0")));
+  EXPECT_TRUE(ValueUtil::equal(list_vals[1], ValueUtil::numberValue(1)));
+  EXPECT_TRUE(ValueUtil::equal(list_vals[2], ValueUtil::structValue(v2)));
+}
+
+TEST_F(StructUtilTest, StructUtilUpdateNewKey) {
+  ProtobufWkt::Struct obj, with;
+  (*obj.mutable_fields())["key0"].set_number_value(1);
+  (*with.mutable_fields())["key1"].set_number_value(1);
+  StructUtil::update(obj, with);
+
+  const auto& fields = obj.fields();
+  EXPECT_TRUE(ValueUtil::equal(fields.at("key0"), ValueUtil::numberValue(1)));
+  EXPECT_TRUE(ValueUtil::equal(fields.at("key1"), ValueUtil::numberValue(1)));
+}
+
+TEST_F(StructUtilTest, StructUtilUpdateRecursiveStruct) {
+  ProtobufWkt::Struct obj, with;
+  *(*obj.mutable_fields())["tags"].mutable_struct_value() =
+      MessageUtil::keyValueStruct("tag0", "1");
+  *(*with.mutable_fields())["tags"].mutable_struct_value() =
+      MessageUtil::keyValueStruct("tag1", "1");
+  StructUtil::update(obj, with);
+
+  ASSERT_EQ(obj.fields().at("tags").kind_case(), ProtobufWkt::Value::KindCase::kStructValue);
+  const auto& tags = obj.fields().at("tags").struct_value().fields();
+  EXPECT_TRUE(ValueUtil::equal(tags.at("tag0"), ValueUtil::stringValue("1")));
+  EXPECT_TRUE(ValueUtil::equal(tags.at("tag1"), ValueUtil::stringValue("1")));
 }
 
 } // namespace Envoy

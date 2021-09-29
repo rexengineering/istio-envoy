@@ -3,12 +3,10 @@
 
 #include "envoy/common/time.h"
 
-#include "common/protobuf/utility.h"
-
+#include "source/common/protobuf/utility.h"
 #include "source/extensions/tracers/xray/daemon.pb.h"
-
-#include "extensions/tracers/xray/tracer.h"
-#include "extensions/tracers/xray/xray_configuration.h"
+#include "source/extensions/tracers/xray/tracer.h"
+#include "source/extensions/tracers/xray/xray_configuration.h"
 
 #include "test/mocks/server/instance.h"
 #include "test/mocks/tracing/mocks.h"
@@ -120,6 +118,16 @@ TEST_F(XRayTracerTest, BaggageNotImplemented) {
   ASSERT_EQ("", span->getBaggage("baggage_key"));
 }
 
+TEST_F(XRayTracerTest, GetTraceId) {
+  Tracer tracer{"" /*span name*/,   "" /*origin*/,        aws_metadata_,
+                std::move(broker_), server_.timeSource(), server_.api().randomGenerator()};
+  auto span = tracer.createNonSampledSpan();
+  span->finishSpan();
+
+  // This method is unimplemented and a noop.
+  ASSERT_EQ(span->getTraceIdAsHex(), "");
+}
+
 TEST_F(XRayTracerTest, ChildSpanHasParentInfo) {
   NiceMock<Tracing::MockConfig> config;
   constexpr auto expected_span_name = "Service 1";
@@ -188,11 +196,11 @@ TEST_F(XRayTracerTest, SpanInjectContextHasXRayHeader) {
                                absl::nullopt /*headers*/);
   Http::TestRequestHeaderMapImpl request_headers;
   span->injectContext(request_headers);
-  auto* header = request_headers.get(Http::LowerCaseString{XRayTraceHeader});
-  ASSERT_NE(header, nullptr);
-  ASSERT_NE(header->value().getStringView().find("Root="), absl::string_view::npos);
-  ASSERT_NE(header->value().getStringView().find("Parent="), absl::string_view::npos);
-  ASSERT_NE(header->value().getStringView().find("Sampled=1"), absl::string_view::npos);
+  auto header = request_headers.get(Http::LowerCaseString{XRayTraceHeader});
+  ASSERT_FALSE(header.empty());
+  ASSERT_NE(header[0]->value().getStringView().find("Root="), absl::string_view::npos);
+  ASSERT_NE(header[0]->value().getStringView().find("Parent="), absl::string_view::npos);
+  ASSERT_NE(header[0]->value().getStringView().find("Sampled=1"), absl::string_view::npos);
 }
 
 TEST_F(XRayTracerTest, SpanInjectContextHasXRayHeaderNonSampled) {
@@ -206,11 +214,11 @@ TEST_F(XRayTracerTest, SpanInjectContextHasXRayHeaderNonSampled) {
   auto span = tracer.createNonSampledSpan();
   Http::TestRequestHeaderMapImpl request_headers;
   span->injectContext(request_headers);
-  auto* header = request_headers.get(Http::LowerCaseString{XRayTraceHeader});
-  ASSERT_NE(header, nullptr);
-  ASSERT_NE(header->value().getStringView().find("Root="), absl::string_view::npos);
-  ASSERT_NE(header->value().getStringView().find("Parent="), absl::string_view::npos);
-  ASSERT_NE(header->value().getStringView().find("Sampled=0"), absl::string_view::npos);
+  auto header = request_headers.get(Http::LowerCaseString{XRayTraceHeader});
+  ASSERT_FALSE(header.empty());
+  ASSERT_NE(header[0]->value().getStringView().find("Root="), absl::string_view::npos);
+  ASSERT_NE(header[0]->value().getStringView().find("Parent="), absl::string_view::npos);
+  ASSERT_NE(header[0]->value().getStringView().find("Sampled=0"), absl::string_view::npos);
 }
 
 TEST_F(XRayTracerTest, TraceIDFormatTest) {

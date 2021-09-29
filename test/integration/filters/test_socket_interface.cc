@@ -6,9 +6,9 @@
 #include "envoy/extensions/network/socket_interface/v3/default_socket_interface.pb.h"
 #include "envoy/network/socket.h"
 
-#include "common/api/os_sys_calls_impl.h"
-#include "common/common/utility.h"
-#include "common/network/address_impl.h"
+#include "source/common/api/os_sys_calls_impl.h"
+#include "source/common/common/utility.h"
+#include "source/common/network/address_impl.h"
 
 namespace Envoy {
 namespace Network {
@@ -30,6 +30,16 @@ IoHandlePtr TestIoSocketHandle::accept(struct sockaddr* addr, socklen_t* addrlen
     return nullptr;
   }
 
+  return std::make_unique<TestIoSocketHandle>(writev_override_, result.rc_, socket_v6only_,
+                                              domain_);
+}
+
+IoHandlePtr TestIoSocketHandle::duplicate() {
+  auto result = Api::OsSysCallsSingleton::get().duplicate(fd_);
+  if (result.rc_ == -1) {
+    throw EnvoyException(fmt::format("duplicate failed for '{}': ({}) {}", fd_, result.errno_,
+                                     errorDetails(result.errno_)));
+  }
   return std::make_unique<TestIoSocketHandle>(writev_override_, result.rc_, socket_v6only_,
                                               domain_);
 }

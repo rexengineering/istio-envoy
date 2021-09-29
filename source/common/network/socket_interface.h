@@ -5,7 +5,7 @@
 #include "envoy/registry/registry.h"
 #include "envoy/server/bootstrap_extension_config.h"
 
-#include "common/singleton/threadsafe_singleton.h"
+#include "source/common/singleton/threadsafe_singleton.h"
 
 #include "absl/container/flat_hash_map.h"
 
@@ -17,9 +17,10 @@ namespace Network {
 class SocketInterfaceExtension : public Server::BootstrapExtension {
 public:
   SocketInterfaceExtension(SocketInterface& sock_interface) : sock_interface_(sock_interface) {}
-  SocketInterface& socketInterface() { return sock_interface_; }
+  // Server::BootstrapExtension
+  void onServerInitialized() override {}
 
-private:
+protected:
   SocketInterface& sock_interface_;
 };
 

@@ -7,12 +7,13 @@
 #include <string>
 #include <type_traits>
 
+#include "envoy/common/optref.h"
 #include "envoy/http/header_map.h"
 
-#include "common/common/non_copyable.h"
-#include "common/common/utility.h"
-#include "common/http/headers.h"
-#include "common/runtime/runtime_features.h"
+#include "source/common/common/non_copyable.h"
+#include "source/common/common/utility.h"
+#include "source/common/http/headers.h"
+#include "source/common/runtime/runtime_features.h"
 
 namespace Envoy {
 namespace Http {
@@ -23,20 +24,24 @@ namespace Http {
 #define DEFINE_INLINE_HEADER_FUNCS(name)                                                           \
 public:                                                                                            \
   const HeaderEntry* name() const override { return getInline(HeaderHandles::get().name); }        \
+  size_t remove##name() override { return removeInline(HeaderHandles::get().name); }               \
+  absl::string_view get##name##Value() const override {                                            \
+    return getInlineValue(HeaderHandles::get().name);                                              \
+  }                                                                                                \
+  void set##name(absl::string_view value) override { setInline(HeaderHandles::get().name, value); }
+
+#define DEFINE_INLINE_HEADER_STRING_FUNCS(name)                                                    \
+  DEFINE_INLINE_HEADER_FUNCS(name)                                                                 \
   void append##name(absl::string_view data, absl::string_view delimiter) override {                \
     appendInline(HeaderHandles::get().name, data, delimiter);                                      \
   }                                                                                                \
   void setReference##name(absl::string_view value) override {                                      \
     setReferenceInline(HeaderHandles::get().name, value);                                          \
-  }                                                                                                \
-  void set##name(absl::string_view value) override {                                               \
-    setInline(HeaderHandles::get().name, value);                                                   \
-  }                                                                                                \
-  void set##name(uint64_t value) override { setInline(HeaderHandles::get().name, value); }         \
-  size_t remove##name() override { return removeInline(HeaderHandles::get().name); }               \
-  absl::string_view get##name##Value() const override {                                            \
-    return getInlineValue(HeaderHandles::get().name);                                              \
   }
+
+#define DEFINE_INLINE_HEADER_NUMERIC_FUNCS(name)                                                   \
+  DEFINE_INLINE_HEADER_FUNCS(name)                                                                 \
+  void set##name(uint64_t value) override { setInline(HeaderHandles::get().name, value); }
 
 /**
  * Implementation of Http::HeaderMap. This is heavily optimized for performance. Roughly, when
@@ -86,8 +91,7 @@ public:
   void setReferenceKey(const LowerCaseString& key, absl::string_view value);
   void setCopy(const LowerCaseString& key, absl::string_view value);
   uint64_t byteSize() const;
-  const HeaderEntry* get(const LowerCaseString& key) const;
-  HeaderMap::GetResult getAll(const LowerCaseString& key) const;
+  HeaderMap::GetResult get(const LowerCaseString& key) const;
   void iterate(HeaderMap::ConstIterateCb cb) const;
   void iterateReverse(HeaderMap::ConstIterateCb cb) const;
   void clear();
@@ -97,6 +101,10 @@ public:
   size_t size() const { return headers_.size(); }
   bool empty() const { return headers_.empty(); }
   void dumpState(std::ostream& os, int indent_level = 0) const;
+  StatefulHeaderKeyFormatterOptConstRef formatter() const {
+    return StatefulHeaderKeyFormatterOptConstRef(makeOptRefFromPtr(formatter_.get()));
+  }
+  StatefulHeaderKeyFormatterOptRef formatter() { return makeOptRefFromPtr(formatter_.get()); }
 
 protected:
   struct HeaderEntryImpl : public HeaderEntry, NonCopyable {
@@ -314,7 +322,10 @@ protected:
   HeaderEntryImpl& maybeCreateInline(HeaderEntryImpl** entry, const LowerCaseString& key);
   HeaderEntryImpl& maybeCreateInline(HeaderEntryImpl** entry, const LowerCaseString& key,
                                      HeaderString&& value);
-  HeaderMap::NonConstGetResult getExisting(const LowerCaseString& key);
+
+  HeaderMap::NonConstGetResult getExisting(absl::string_view key);
+  size_t removeExisting(absl::string_view key);
+
   size_t removeInline(HeaderEntryImpl** entry);
   void updateSize(uint64_t from_size, uint64_t to_size);
   void addSize(uint64_t size);
@@ -324,8 +335,15 @@ protected:
   virtual HeaderEntryImpl** inlineHeaders() PURE;
 
   HeaderList headers_;
+  // TODO(mattklein123): The formatter does not currently get copied when a header map gets
+  // copied. This may be problematic in certain cases like request shadowing. This is omitted
+  // on purpose until someone asks for it, at which point a clone() method can be created to
+  // avoid using extra space/processing for a shared_ptr.
+  StatefulHeaderKeyFormatterPtr formatter_;
   // This holds the internal byte size of the HeaderMap.
   uint64_t cached_byte_size_ = 0;
+  const bool header_map_correctly_coalesce_cookies_ = Runtime::runtimeFeatureEnabled(
+      "envoy.reloadable_features.header_map_correctly_coalesce_cookies");
 };
 
 /**
@@ -335,6 +353,10 @@ protected:
  */
 template <class Interface> class TypedHeaderMapImpl : public HeaderMapImpl, public Interface {
 public:
+  void setFormatter(StatefulHeaderKeyFormatterPtr&& formatter) {
+    formatter_ = std::move(formatter);
+  }
+
   // Implementation of Http::HeaderMap that passes through to HeaderMapImpl.
   bool operator==(const HeaderMap& rhs) const override { return HeaderMapImpl::operator==(rhs); }
   bool operator!=(const HeaderMap& rhs) const override { return HeaderMapImpl::operator!=(rhs); }
@@ -369,11 +391,8 @@ public:
     HeaderMapImpl::setCopy(key, value);
   }
   uint64_t byteSize() const override { return HeaderMapImpl::byteSize(); }
-  const HeaderEntry* get(const LowerCaseString& key) const override {
+  HeaderMap::GetResult get(const LowerCaseString& key) const override {
     return HeaderMapImpl::get(key);
-  }
-  HeaderMap::GetResult getAll(const LowerCaseString& key) const override {
-    return HeaderMapImpl::getAll(key);
   }
   void iterate(HeaderMap::ConstIterateCb cb) const override { HeaderMapImpl::iterate(cb); }
   void iterateReverse(HeaderMap::ConstIterateCb cb) const override {
@@ -392,6 +411,10 @@ public:
   void dumpState(std::ostream& os, int indent_level = 0) const override {
     HeaderMapImpl::dumpState(os, indent_level);
   }
+  StatefulHeaderKeyFormatterOptConstRef formatter() const override {
+    return HeaderMapImpl::formatter();
+  }
+  StatefulHeaderKeyFormatterOptRef formatter() override { return HeaderMapImpl::formatter(); }
 
   // Generic custom header functions for each fully typed interface. To avoid accidental issues,
   // the Handle type is different for each interface, which is why these functions live here vs.
@@ -455,8 +478,16 @@ public:
     return std::unique_ptr<RequestHeaderMapImpl>(new (inlineHeadersSize()) RequestHeaderMapImpl());
   }
 
-  INLINE_REQ_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
-  INLINE_REQ_RESP_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
+  INLINE_REQ_STRING_HEADERS(DEFINE_INLINE_HEADER_STRING_FUNCS)
+  INLINE_REQ_NUMERIC_HEADERS(DEFINE_INLINE_HEADER_NUMERIC_FUNCS)
+  INLINE_REQ_RESP_STRING_HEADERS(DEFINE_INLINE_HEADER_STRING_FUNCS)
+  INLINE_REQ_RESP_NUMERIC_HEADERS(DEFINE_INLINE_HEADER_NUMERIC_FUNCS)
+
+  // Tracing::TraceContext
+  absl::optional<absl::string_view> getTraceContext(absl::string_view key) const override;
+  void setTraceContext(absl::string_view key, absl::string_view val) override;
+  void setTraceContextReferenceKey(absl::string_view key, absl::string_view val) override;
+  void setTraceContextReference(absl::string_view key, absl::string_view val) override;
 
 protected:
   // NOTE: Because inline_headers_ is a variable size member, it must be the last member in the
@@ -469,8 +500,10 @@ protected:
 
 private:
   struct HeaderHandleValues {
-    INLINE_REQ_HEADERS(DEFINE_HEADER_HANDLE)
-    INLINE_REQ_RESP_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_REQ_STRING_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_REQ_NUMERIC_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_REQ_RESP_STRING_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_REQ_RESP_NUMERIC_HEADERS(DEFINE_HEADER_HANDLE)
   };
 
   using HeaderHandles = ConstSingleton<HeaderHandleValues>;
@@ -516,9 +549,12 @@ public:
                                                       ResponseHeaderMapImpl());
   }
 
-  INLINE_RESP_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
-  INLINE_REQ_RESP_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
-  INLINE_RESP_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_FUNCS)
+  INLINE_RESP_STRING_HEADERS(DEFINE_INLINE_HEADER_STRING_FUNCS)
+  INLINE_RESP_NUMERIC_HEADERS(DEFINE_INLINE_HEADER_NUMERIC_FUNCS)
+  INLINE_REQ_RESP_STRING_HEADERS(DEFINE_INLINE_HEADER_STRING_FUNCS)
+  INLINE_REQ_RESP_NUMERIC_HEADERS(DEFINE_INLINE_HEADER_NUMERIC_FUNCS)
+  INLINE_RESP_STRING_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_STRING_FUNCS)
+  INLINE_RESP_NUMERIC_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_NUMERIC_FUNCS)
 
 protected:
   // See comment in RequestHeaderMapImpl.
@@ -528,9 +564,12 @@ protected:
 
 private:
   struct HeaderHandleValues {
-    INLINE_RESP_HEADERS(DEFINE_HEADER_HANDLE)
-    INLINE_REQ_RESP_HEADERS(DEFINE_HEADER_HANDLE)
-    INLINE_RESP_HEADERS_TRAILERS(DEFINE_HEADER_HANDLE)
+    INLINE_RESP_STRING_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_RESP_NUMERIC_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_REQ_RESP_STRING_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_REQ_RESP_NUMERIC_HEADERS(DEFINE_HEADER_HANDLE)
+    INLINE_RESP_STRING_HEADERS_TRAILERS(DEFINE_HEADER_HANDLE)
+    INLINE_RESP_NUMERIC_HEADERS_TRAILERS(DEFINE_HEADER_HANDLE)
   };
 
   using HeaderHandles = ConstSingleton<HeaderHandleValues>;
@@ -552,7 +591,8 @@ public:
                                                        ResponseTrailerMapImpl());
   }
 
-  INLINE_RESP_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_FUNCS)
+  INLINE_RESP_STRING_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_STRING_FUNCS)
+  INLINE_RESP_NUMERIC_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_NUMERIC_FUNCS)
 
 protected:
   // See comment in RequestHeaderMapImpl.
@@ -562,7 +602,8 @@ protected:
 
 private:
   struct HeaderHandleValues {
-    INLINE_RESP_HEADERS_TRAILERS(DEFINE_HEADER_HANDLE)
+    INLINE_RESP_STRING_HEADERS_TRAILERS(DEFINE_HEADER_HANDLE)
+    INLINE_RESP_NUMERIC_HEADERS_TRAILERS(DEFINE_HEADER_HANDLE)
   };
 
   using HeaderHandles = ConstSingleton<HeaderHandleValues>;

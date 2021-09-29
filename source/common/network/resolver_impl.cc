@@ -1,4 +1,4 @@
-#include "common/network/resolver_impl.h"
+#include "source/common/network/resolver_impl.h"
 
 #include "envoy/common/exception.h"
 #include "envoy/config/core/v3/address.pb.h"
@@ -6,9 +6,9 @@
 #include "envoy/network/resolver.h"
 #include "envoy/registry/registry.h"
 
-#include "common/config/well_known_names.h"
-#include "common/network/address_impl.h"
-#include "common/network/utility.h"
+#include "source/common/config/well_known_names.h"
+#include "source/common/network/address_impl.h"
+#include "source/common/network/utility.h"
 
 namespace Envoy {
 namespace Network {
@@ -48,7 +48,7 @@ InstanceConstSharedPtr resolveProtoAddress(const envoy::config::core::v3::Addres
   case envoy::config::core::v3::Address::AddressCase::kSocketAddress:
     return resolveProtoSocketAddress(address.socket_address());
   case envoy::config::core::v3::Address::AddressCase::kPipe:
-    return std::make_shared<PipeInstance>(address.pipe().path());
+    return std::make_shared<PipeInstance>(address.pipe().path(), address.pipe().mode());
   case envoy::config::core::v3::Address::AddressCase::kEnvoyInternalAddress:
     switch (address.envoy_internal_address().address_name_specifier_case()) {
     case envoy::config::core::v3::EnvoyInternalAddress::AddressNameSpecifierCase::

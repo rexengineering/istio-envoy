@@ -1,4 +1,4 @@
-#include "extensions/filters/network/mongo_proxy/config.h"
+#include "source/extensions/filters/network/mongo_proxy/config.h"
 
 #include <memory>
 
@@ -7,9 +7,8 @@
 #include "envoy/network/connection.h"
 #include "envoy/registry/registry.h"
 
-#include "common/common/fmt.h"
-
-#include "extensions/filters/network/mongo_proxy/proxy.h"
+#include "source/common/common/fmt.h"
+#include "source/extensions/filters/network/mongo_proxy/proxy.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -34,7 +33,13 @@ Network::FilterFactoryCb MongoProxyFilterConfigFactory::createFilterFactoryFromP
     fault_config = std::make_shared<Filters::Common::Fault::FaultDelayConfig>(proto_config.delay());
   }
 
-  auto stats = std::make_shared<MongoStats>(context.scope(), stat_prefix);
+  auto commands = std::vector<std::string>{"delete", "insert", "update"};
+  if (proto_config.commands_size() > 0) {
+    commands =
+        std::vector<std::string>(proto_config.commands().begin(), proto_config.commands().end());
+  }
+
+  auto stats = std::make_shared<MongoStats>(context.scope(), stat_prefix, commands);
   const bool emit_dynamic_metadata = proto_config.emit_dynamic_metadata();
   return [stat_prefix, &context, access_log, fault_config, emit_dynamic_metadata,
           stats](Network::FilterManager& filter_manager) -> void {

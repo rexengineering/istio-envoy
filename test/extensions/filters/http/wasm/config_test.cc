@@ -2,15 +2,15 @@
 
 #include "envoy/extensions/filters/http/wasm/v3/wasm.pb.validate.h"
 
-#include "common/common/base64.h"
-#include "common/common/hex.h"
-#include "common/crypto/utility.h"
-#include "common/http/message_impl.h"
-#include "common/stats/isolated_store_impl.h"
+#include "source/common/common/base64.h"
+#include "source/common/common/hex.h"
+#include "source/common/crypto/utility.h"
+#include "source/common/http/message_impl.h"
+#include "source/common/stats/isolated_store_impl.h"
+#include "source/extensions/common/wasm/wasm.h"
+#include "source/extensions/filters/http/wasm/config.h"
 
-#include "extensions/common/wasm/wasm.h"
-#include "extensions/filters/http/wasm/config.h"
-
+#include "test/extensions/common/wasm/wasm_runtime.h"
 #include "test/mocks/http/mocks.h"
 #include "test/mocks/server/mocks.h"
 #include "test/test_common/environment.h"
@@ -29,7 +29,6 @@ using Common::Wasm::WasmException;
 namespace HttpFilters {
 namespace Wasm {
 
-#if defined(ENVOY_WASM_V8) || defined(ENVOY_WASM_WAVM)
 class WasmFilterConfigTest : public Event::TestUsingSimulatedTime,
                              public testing::TestWithParam<std::string> {
 protected:
@@ -65,22 +64,17 @@ protected:
   Event::TimerCb retry_timer_cb_;
 };
 
-// NB: this is required by VC++ which can not handle the use of macros in the macro definitions
-// used by INSTANTIATE_TEST_SUITE_P.
-auto testing_values = testing::Values(
-#if defined(ENVOY_WASM_V8)
-    "v8"
-#endif
-#if defined(ENVOY_WASM_V8) && defined(ENVOY_WASM_WAVM)
-    ,
-#endif
-#if defined(ENVOY_WASM_WAVM)
-    "wavm"
-#endif
-);
-INSTANTIATE_TEST_SUITE_P(Runtimes, WasmFilterConfigTest, testing_values);
+INSTANTIATE_TEST_SUITE_P(Runtimes, WasmFilterConfigTest,
+                         Envoy::Extensions::Common::Wasm::sandbox_runtime_values);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WasmFilterConfigTest);
 
 TEST_P(WasmFilterConfigTest, JsonLoadFromFileWasm) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string json = TestEnvironment::substitute(absl::StrCat(R"EOF(
   {
   "config" : {
@@ -113,6 +107,12 @@ TEST_P(WasmFilterConfigTest, JsonLoadFromFileWasm) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromFileWasm) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string yaml = TestEnvironment::substitute(absl::StrCat(R"EOF(
   config:
     vm_config:
@@ -128,18 +128,38 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromFileWasm) {
 
   envoy::extensions::filters::http::wasm::v3::Wasm proto_config;
   TestUtility::loadFromYaml(yaml, proto_config);
-  WasmFilterConfig factory;
-  Http::FilterFactoryCb cb = factory.createFilterFactoryFromProto(proto_config, "stats", context_);
-  EXPECT_CALL(init_watcher_, ready());
-  context_.initManager().initialize(init_watcher_);
-  EXPECT_EQ(context_.initManager().state(), Init::Manager::State::Initialized);
-  Http::MockFilterChainFactoryCallbacks filter_callback;
-  EXPECT_CALL(filter_callback, addStreamFilter(_));
-  EXPECT_CALL(filter_callback, addAccessLogHandler(_));
-  cb(filter_callback);
+
+  // Intentionally we scope the factory here, and make the context outlive it.
+  // This case happens when the config is updated by ECDS, and
+  // we have to make sure that contexts still hold valid WasmVMs in these cases.
+  std::shared_ptr<Envoy::Extensions::Common::Wasm::Context> context = nullptr;
+  {
+    WasmFilterConfig factory;
+    Http::FilterFactoryCb cb =
+        factory.createFilterFactoryFromProto(proto_config, "stats", context_);
+    EXPECT_CALL(init_watcher_, ready());
+    context_.initManager().initialize(init_watcher_);
+    EXPECT_EQ(context_.initManager().state(), Init::Manager::State::Initialized);
+    Http::MockFilterChainFactoryCallbacks filter_callback;
+    EXPECT_CALL(filter_callback, addStreamFilter(_))
+        .WillOnce([&context](Http::StreamFilterSharedPtr filter) {
+          context = std::static_pointer_cast<Envoy::Extensions::Common::Wasm::Context>(filter);
+        });
+    EXPECT_CALL(filter_callback, addAccessLogHandler(_));
+    cb(filter_callback);
+  }
+  // Check if the context still holds a valid Wasm even after the factory is destroyed.
+  EXPECT_TRUE(context);
+  EXPECT_TRUE(context->wasm());
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromFileWasmFailOpenOk) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string yaml = TestEnvironment::substitute(absl::StrCat(R"EOF(
   config:
     fail_open: true
@@ -168,6 +188,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromFileWasmFailOpenOk) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadInlineWasm) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   EXPECT_FALSE(code.empty());
@@ -176,7 +202,7 @@ TEST_P(WasmFilterConfigTest, YamlLoadInlineWasm) {
     vm_config:
       runtime: "envoy.wasm.runtime.)EOF",
                                         GetParam(), R"EOF("
-      code: 
+      code:
         local: { inline_bytes: ")EOF",
                                         Base64::encode(code.data(), code.size()), R"EOF(" }
                                         )EOF");
@@ -212,6 +238,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadInlineBadCode) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasm) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   const std::string sha256 = Hex::encode(
@@ -235,9 +267,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasm) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -260,6 +293,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasm) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailOnUncachedThenSucceed) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   const std::string sha256 = Hex::encode(
@@ -284,9 +323,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailOnUncachedThenSucceed) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -325,6 +365,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailOnUncachedThenSucceed) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailCachedThenSucceed) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   const std::string sha256 = Hex::encode(
@@ -351,11 +397,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailCachedThenSucceed) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillRepeatedly(ReturnRef(cluster_manager_.async_client_));
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillRepeatedly(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
 
   Http::AsyncClient::Callbacks* async_callbacks = nullptr;
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillRepeatedly(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -401,7 +448,7 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailCachedThenSucceed) {
   // Wait for negative cache to timeout.
   ::Envoy::Extensions::Common::Wasm::setTimeOffsetForCodeCacheForTesting(std::chrono::seconds(10));
 
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillRepeatedly(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -516,6 +563,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteWasmFailCachedThenSucceed) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteConnectionReset) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   const std::string sha256 = Hex::encode(
@@ -541,9 +594,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteConnectionReset) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -557,6 +611,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteConnectionReset) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessWith503) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   const std::string sha256 = Hex::encode(
@@ -582,9 +642,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessWith503) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -601,6 +662,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessWith503) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessIncorrectSha256) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
   const std::string sha256 = Hex::encode(
@@ -625,9 +692,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessIncorrectSha256) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -645,6 +713,12 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessIncorrectSha256) {
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteMultipleRetries) {
+#if defined(__aarch64__)
+  // TODO(PiotrSikora): There are no Emscripten releases for arm64.
+  if (GetParam() != "null") {
+    return;
+  }
+#endif
   initializeForRemote();
   const std::string code = TestEnvironment::readFileToStringForTest(TestEnvironment::substitute(
       "{{ test_rundir }}/test/extensions/filters/http/wasm/test_data/test_cpp.wasm"));
@@ -671,9 +745,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteMultipleRetries) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
   int num_retries = 3;
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillRepeatedly(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillRepeatedly(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .Times(num_retries)
       .WillRepeatedly(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
@@ -689,7 +764,7 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteMultipleRetries) {
   EXPECT_CALL(*retry_timer_, enableTimer(_, _))
       .WillRepeatedly(Invoke([&](const std::chrono::milliseconds&, const ScopeTrackedObject*) {
         if (--num_retries == 0) {
-          EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+          EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
               .WillOnce(Invoke(
                   [&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                       const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -739,9 +814,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessBadcode) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -774,10 +850,14 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessBadcode) {
 
   context->setDecoderFilterCallbacks(decoder_callbacks);
   EXPECT_CALL(decoder_callbacks, streamInfo()).WillRepeatedly(ReturnRef(stream_info));
-  EXPECT_CALL(stream_info, setResponseCodeDetails("wasm_fail_stream"));
-  EXPECT_CALL(decoder_callbacks, resetStream());
-
-  EXPECT_EQ(context->onRequestHeaders(10, false), proxy_wasm::FilterHeadersStatus::StopIteration);
+  auto headers = Http::TestResponseHeaderMapImpl{{":status", "503"}};
+  EXPECT_CALL(decoder_callbacks, encodeHeaders_(HeaderMapEqualRef(&headers), true));
+  EXPECT_CALL(decoder_callbacks,
+              sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
+                             testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
+                             testing::Eq("wasm_fail_stream")));
+  EXPECT_EQ(context->onRequestHeaders(10, false),
+            proxy_wasm::FilterHeadersStatus::StopAllIterationAndWatermark);
 }
 
 TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessBadcodeFailOpen) {
@@ -804,9 +884,10 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessBadcodeFailOpen) {
   NiceMock<Http::MockAsyncClient> client;
   NiceMock<Http::MockAsyncClientRequest> request(&client);
 
-  EXPECT_CALL(cluster_manager_, httpAsyncClientForCluster("cluster_1"))
-      .WillOnce(ReturnRef(cluster_manager_.async_client_));
-  EXPECT_CALL(cluster_manager_.async_client_, send_(_, _, _))
+  cluster_manager_.initializeThreadLocalClusters({"cluster_1"});
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_, httpAsyncClient())
+      .WillOnce(ReturnRef(cluster_manager_.thread_local_cluster_.async_client_));
+  EXPECT_CALL(cluster_manager_.thread_local_cluster_.async_client_, send_(_, _, _))
       .WillOnce(
           Invoke([&](Http::RequestMessagePtr&, Http::AsyncClient::Callbacks& callbacks,
                      const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
@@ -825,7 +906,6 @@ TEST_P(WasmFilterConfigTest, YamlLoadFromRemoteSuccessBadcodeFailOpen) {
   // The filter is not registered.
   cb(filter_callback);
 }
-#endif
 
 } // namespace Wasm
 } // namespace HttpFilters

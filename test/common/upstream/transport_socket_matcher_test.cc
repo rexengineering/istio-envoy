@@ -8,11 +8,10 @@
 #include "envoy/network/transport_socket.h"
 #include "envoy/stats/scope.h"
 
-#include "common/config/metadata.h"
-#include "common/network/transport_socket_options_impl.h"
-#include "common/upstream/transport_socket_match_impl.h"
-
-#include "server/transport_socket_config_impl.h"
+#include "source/common/config/metadata.h"
+#include "source/common/network/transport_socket_options_impl.h"
+#include "source/common/upstream/transport_socket_match_impl.h"
+#include "source/server/transport_socket_config_impl.h"
 
 #include "test/mocks/network/mocks.h"
 #include "test/mocks/server/transport_socket_factory_context.h"
@@ -33,7 +32,7 @@ public:
   MOCK_METHOD(bool, implementsSecureTransport, (), (const));
   MOCK_METHOD(bool, usesProxyProtocolOptions, (), (const));
   MOCK_METHOD(Network::TransportSocketPtr, createTransportSocket,
-              (Network::TransportSocketOptionsSharedPtr), (const));
+              (Network::TransportSocketOptionsConstSharedPtr), (const));
   FakeTransportSocketFactory(std::string id) : id_(std::move(id)) {}
   std::string id() const { return id_; }
 
@@ -49,7 +48,7 @@ public:
   MOCK_METHOD(bool, implementsSecureTransport, (), (const));
   MOCK_METHOD(bool, usesProxyProtocolOptions, (), (const));
   MOCK_METHOD(Network::TransportSocketPtr, createTransportSocket,
-              (Network::TransportSocketOptionsSharedPtr), (const));
+              (Network::TransportSocketOptionsConstSharedPtr), (const));
 
   Network::TransportSocketFactoryPtr
   createTransportSocketFactory(const Protobuf::Message& proto,
@@ -110,7 +109,8 @@ match:
   hasSidecar: "true"
 transport_socket:
   name: "foo"
-  config:
+  typed_config:
+    "@type": type.googleapis.com/envoy.config.core.v3.Node
     id: "abc"
  )EOF"});
 
@@ -125,7 +125,8 @@ match:
   sidecar: "true"
 transport_socket:
   name: "foo"
-  config:
+  typed_config:
+    "@type": type.googleapis.com/envoy.config.core.v3.Node
     id: "sidecar")EOF",
         R"EOF(
 name: "http_socket"
@@ -133,7 +134,8 @@ match:
   protocol: "http"
 transport_socket:
   name: "foo"
-  config:
+  typed_config:
+    "@type": type.googleapis.com/envoy.config.core.v3.Node
     id: "http"
  )EOF"});
 
@@ -161,7 +163,8 @@ match:
   protocol: "http"
 transport_socket:
   name: "foo"
-  config:
+  typed_config:
+    "@type": type.googleapis.com/envoy.config.core.v3.Node
     id: "sidecar_http"
  )EOF",
         R"EOF(
@@ -170,7 +173,8 @@ match:
   sidecar: "true"
 transport_socket:
   name: "foo"
-  config:
+  typed_config:
+    "@type": type.googleapis.com/envoy.config.core.v3.Node
     id: "sidecar"
  )EOF"});
   envoy::config::core::v3::Metadata metadata;
@@ -188,7 +192,8 @@ name: "match_all"
 match: {}
 transport_socket:
   name: "foo"
-  config:
+  typed_config:
+    "@type": type.googleapis.com/envoy.config.core.v3.Node
     id: "match_all"
  )EOF"});
   envoy::config::core::v3::Metadata metadata;

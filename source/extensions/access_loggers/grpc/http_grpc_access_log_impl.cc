@@ -1,15 +1,15 @@
-#include "extensions/access_loggers/grpc/http_grpc_access_log_impl.h"
+#include "source/extensions/access_loggers/grpc/http_grpc_access_log_impl.h"
 
 #include "envoy/config/core/v3/base.pb.h"
 #include "envoy/data/accesslog/v3/accesslog.pb.h"
 #include "envoy/extensions/access_loggers/grpc/v3/als.pb.h"
 
-#include "common/common/assert.h"
-#include "common/http/headers.h"
-#include "common/network/utility.h"
-#include "common/stream_info/utility.h"
-
-#include "extensions/access_loggers/grpc/grpc_access_log_utils.h"
+#include "source/common/common/assert.h"
+#include "source/common/config/utility.h"
+#include "source/common/http/headers.h"
+#include "source/common/network/utility.h"
+#include "source/common/stream_info/utility.h"
+#include "source/extensions/access_loggers/grpc/grpc_access_log_utils.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -42,9 +42,10 @@ HttpGrpcAccessLog::HttpGrpcAccessLog(
     response_trailers_to_log_.emplace_back(header);
   }
 
-  tls_slot_->set([this](Event::Dispatcher&) {
+  tls_slot_->set([this, transport_version = Envoy::Config::Utility::getAndCheckTransportVersion(
+                            config_.common_config())](Event::Dispatcher&) {
     return std::make_shared<ThreadLocalLogger>(access_logger_cache_->getOrCreateLogger(
-        config_.common_config(), GrpcCommon::GrpcAccessLoggerType::HTTP, scope_));
+        config_.common_config(), transport_version, Common::GrpcAccessLoggerType::HTTP, scope_));
   });
 }
 
@@ -115,9 +116,11 @@ void HttpGrpcAccessLog::emitLog(const Http::RequestHeaderMap& request_headers,
     auto* logged_headers = request_properties->mutable_request_headers();
 
     for (const auto& header : request_headers_to_log_) {
-      const Http::HeaderEntry* entry = request_headers.get(header);
-      if (entry != nullptr) {
-        logged_headers->insert({header.get(), std::string(entry->value().getStringView())});
+      const auto entry = request_headers.get(header);
+      if (!entry.empty()) {
+        // TODO(https://github.com/envoyproxy/envoy/issues/13454): Potentially log all header
+        // values.
+        logged_headers->insert({header.get(), std::string(entry[0]->value().getStringView())});
       }
     }
   }
@@ -136,9 +139,11 @@ void HttpGrpcAccessLog::emitLog(const Http::RequestHeaderMap& request_headers,
     auto* logged_headers = response_properties->mutable_response_headers();
 
     for (const auto& header : response_headers_to_log_) {
-      const Http::HeaderEntry* entry = response_headers.get(header);
-      if (entry != nullptr) {
-        logged_headers->insert({header.get(), std::string(entry->value().getStringView())});
+      const auto entry = response_headers.get(header);
+      if (!entry.empty()) {
+        // TODO(https://github.com/envoyproxy/envoy/issues/13454): Potentially log all header
+        // values.
+        logged_headers->insert({header.get(), std::string(entry[0]->value().getStringView())});
       }
     }
   }
@@ -147,9 +152,11 @@ void HttpGrpcAccessLog::emitLog(const Http::RequestHeaderMap& request_headers,
     auto* logged_headers = response_properties->mutable_response_trailers();
 
     for (const auto& header : response_trailers_to_log_) {
-      const Http::HeaderEntry* entry = response_trailers.get(header);
-      if (entry != nullptr) {
-        logged_headers->insert({header.get(), std::string(entry->value().getStringView())});
+      const auto entry = response_trailers.get(header);
+      if (!entry.empty()) {
+        // TODO(https://github.com/envoyproxy/envoy/issues/13454): Potentially log all header
+        // values.
+        logged_headers->insert({header.get(), std::string(entry[0]->value().getStringView())});
       }
     }
   }

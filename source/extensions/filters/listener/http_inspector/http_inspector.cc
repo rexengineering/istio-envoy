@@ -1,16 +1,14 @@
-#include "extensions/filters/listener/http_inspector/http_inspector.h"
+#include "source/extensions/filters/listener/http_inspector/http_inspector.h"
 
 #include "envoy/event/dispatcher.h"
 #include "envoy/network/listen_socket.h"
 #include "envoy/stats/scope.h"
 
-#include "common/api/os_sys_calls_impl.h"
-#include "common/common/assert.h"
-#include "common/common/macros.h"
-#include "common/http/headers.h"
-#include "common/http/utility.h"
-
-#include "extensions/transport_sockets/well_known_names.h"
+#include "source/common/api/os_sys_calls_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/macros.h"
+#include "source/common/http/headers.h"
+#include "source/common/http/utility.h"
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_split.h"
@@ -40,8 +38,7 @@ Network::FilterStatus Filter::onAccept(Network::ListenerFilterCallbacks& cb) {
   const Network::ConnectionSocket& socket = cb.socket();
 
   const absl::string_view transport_protocol = socket.detectedTransportProtocol();
-  if (!transport_protocol.empty() &&
-      transport_protocol != TransportSockets::TransportProtocolNames::get().RawBuffer) {
+  if (!transport_protocol.empty() && transport_protocol != "raw_buffer") {
     ENVOY_LOG(trace, "http inspector: cannot inspect http protocol with transport socket {}",
               transport_protocol);
     return Network::FilterStatus::Continue;
@@ -60,8 +57,7 @@ Network::FilterStatus Filter::onAccept(Network::ListenerFilterCallbacks& cb) {
     return Network::FilterStatus::Continue;
   case ParseState::Continue:
     // do nothing but create the event
-    ASSERT(file_event_ == nullptr);
-    file_event_ = cb.socket().ioHandle().createFileEvent(
+    cb.socket().ioHandle().initializeFileEvent(
         cb.dispatcher(),
         [this](uint32_t events) {
           ENVOY_LOG(trace, "http inspector event: {}", events);
@@ -73,11 +69,11 @@ Network::FilterStatus Filter::onAccept(Network::ListenerFilterCallbacks& cb) {
           const ParseState parse_state = onRead();
           switch (parse_state) {
           case ParseState::Error:
-            file_event_.reset();
+            cb_->socket().ioHandle().resetFileEvents();
             cb_->continueFilterChain(false);
             break;
           case ParseState::Done:
-            file_event_.reset();
+            cb_->socket().ioHandle().resetFileEvents();
             // Do not skip following listener filters.
             cb_->continueFilterChain(true);
             break;
@@ -86,7 +82,7 @@ Network::FilterStatus Filter::onAccept(Network::ListenerFilterCallbacks& cb) {
               // Parser fails to determine http but the end of stream is reached. Fallback to
               // non-http.
               done(false);
-              file_event_.reset();
+              cb_->socket().ioHandle().resetFileEvents();
               cb_->continueFilterChain(true);
             }
             // do nothing but wait for the next event

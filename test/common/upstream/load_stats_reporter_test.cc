@@ -3,7 +3,7 @@
 #include "envoy/config/endpoint/v3/load_report.pb.h"
 #include "envoy/service/load_stats/v3/lrs.pb.h"
 
-#include "common/upstream/load_stats_reporter.h"
+#include "source/common/upstream/load_stats_reporter.h"
 
 #include "test/mocks/event/mocks.h"
 #include "test/mocks/grpc/mocks.h"
@@ -125,7 +125,8 @@ TEST_F(LoadStatsReporterTest, ExistingClusters) {
   foo_cluster.info_->load_report_stats_.upstream_rq_dropped_.add(2);
   foo_cluster.info_->eds_service_name_ = "bar";
   NiceMock<MockClusterMockPrioritySet> bar_cluster;
-  MockClusterManager::ClusterInfoMap cluster_info{{"foo", foo_cluster}, {"bar", bar_cluster}};
+  MockClusterManager::ClusterInfoMaps cluster_info{{{"foo", foo_cluster}, {"bar", bar_cluster}},
+                                                   {}};
   ON_CALL(cm_, clusters()).WillByDefault(Return(cluster_info));
   deliverLoadStatsResponse({"foo"});
   // Initial stats report for foo on timer tick.

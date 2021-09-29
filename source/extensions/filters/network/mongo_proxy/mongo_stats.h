@@ -6,8 +6,8 @@
 
 #include "envoy/stats/scope.h"
 
-#include "common/stats/symbol_table_impl.h"
-#include "common/stats/utility.h"
+#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/utility.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -16,7 +16,8 @@ namespace MongoProxy {
 
 class MongoStats {
 public:
-  MongoStats(Stats::Scope& scope, absl::string_view prefix);
+  MongoStats(Stats::Scope& scope, absl::string_view prefix,
+             const std::vector<std::string>& commands);
 
   void incCounter(const Stats::ElementVec& names);
   void recordHistogram(const Stats::ElementVec& names, Stats::Histogram::Unit unit,

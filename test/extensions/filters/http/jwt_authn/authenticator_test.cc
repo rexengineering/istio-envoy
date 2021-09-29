@@ -1,12 +1,11 @@
 #include "envoy/config/core/v3/http_uri.pb.h"
 #include "envoy/extensions/filters/http/jwt_authn/v3/config.pb.h"
 
-#include "common/http/message_impl.h"
-#include "common/protobuf/utility.h"
-
-#include "extensions/filters/http/common/jwks_fetcher.h"
-#include "extensions/filters/http/jwt_authn/authenticator.h"
-#include "extensions/filters/http/jwt_authn/filter_config.h"
+#include "source/common/http/message_impl.h"
+#include "source/common/protobuf/utility.h"
+#include "source/extensions/filters/http/common/jwks_fetcher.h"
+#include "source/extensions/filters/http/jwt_authn/authenticator.h"
+#include "source/extensions/filters/http/jwt_authn/filter_config.h"
 
 #include "test/extensions/filters/http/common/mock.h"
 #include "test/extensions/filters/http/jwt_authn/mock.h"
@@ -43,13 +42,12 @@ public:
       ::google::jwt_verify::CheckAudience* check_audience = nullptr,
       const absl::optional<std::string>& provider = absl::make_optional<std::string>(ProviderName),
       bool allow_failed = false, bool allow_missing = false) {
-    filter_config_ = FilterConfigImpl::create(proto_config_, "", mock_factory_ctx_);
+    filter_config_ = std::make_unique<FilterConfigImpl>(proto_config_, "", mock_factory_ctx_);
     raw_fetcher_ = new MockJwksFetcher;
     fetcher_.reset(raw_fetcher_);
     auth_ = Authenticator::create(
-        check_audience, provider, allow_failed, allow_missing,
-        filter_config_->getCache().getJwksCache(), filter_config_->cm(),
-        [this](Upstream::ClusterManager&) { return std::move(fetcher_); },
+        check_audience, provider, allow_failed, allow_missing, filter_config_->getJwksCache(),
+        filter_config_->cm(), [this](Upstream::ClusterManager&) { return std::move(fetcher_); },
         filter_config_->timeSource());
     jwks_ = Jwks::createFrom(PublicKey, Jwks::JWKS);
     EXPECT_TRUE(jwks_->getStatus() == Status::Ok);
@@ -109,6 +107,26 @@ TEST_F(AuthenticatorTest, TestOkJWTandCache) {
     // Verify the token is removed.
     EXPECT_FALSE(headers.has(Http::CustomHeaders::get().Authorization));
   }
+
+  EXPECT_EQ(1U, filter_config_->stats().jwks_fetch_success_.value());
+  EXPECT_EQ(0U, filter_config_->stats().jwks_fetch_failed_.value());
+}
+
+TEST_F(AuthenticatorTest, TestCompletePaddingInJwtPayload) {
+  (*proto_config_.mutable_providers())[std::string(ProviderName)].set_pad_forward_payload_header(
+      true);
+  createAuthenticator();
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _))
+      .WillOnce(Invoke([this](const envoy::config::core::v3::HttpUri&, Tracing::Span&,
+                              JwksFetcher::JwksReceiver& receiver) {
+        receiver.onJwksSuccess(std::move(jwks_));
+      }));
+
+  Http::TestRequestHeaderMapImpl headers{{"Authorization", "Bearer " + std::string(GoodToken)}};
+
+  expectVerifyStatus(Status::Ok, headers);
+
+  EXPECT_EQ(headers.get_("sec-istio-auth-userinfo"), ExpectedPayloadValueWithPadding);
 }
 
 // This test verifies the Jwt is forwarded if "forward" flag is set.
@@ -132,6 +150,9 @@ TEST_F(AuthenticatorTest, TestForwardJwt) {
 
   // Payload not set by default
   EXPECT_EQ(out_name_, "");
+
+  EXPECT_EQ(1U, filter_config_->stats().jwks_fetch_success_.value());
+  EXPECT_EQ(0U, filter_config_->stats().jwks_fetch_failed_.value());
 }
 
 // This test verifies the Jwt payload is set.
@@ -174,8 +195,64 @@ TEST_F(AuthenticatorTest, TestJwtWithNonExistKid) {
   expectVerifyStatus(Status::JwtVerificationFail, headers);
 }
 
-// This test verifies the Jwt without "iss" work
-TEST_F(AuthenticatorTest, TestJwtWithoutIss) {
+// Jwt "iss" is "other.com", it doesn't match "issuer" specified in JwtProvider.
+// The verification fails with JwtUnknownIssuer.
+TEST_F(AuthenticatorTest, TestWrongIssuer) {
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(0);
+  // Token with other issuer should fail.
+  Http::TestRequestHeaderMapImpl headers{
+      {"Authorization", "Bearer " + std::string(OtherGoodToken)}};
+  expectVerifyStatus(Status::JwtUnknownIssuer, headers);
+
+  EXPECT_EQ(0U, filter_config_->stats().jwks_fetch_success_.value());
+  EXPECT_EQ(0U, filter_config_->stats().jwks_fetch_failed_.value());
+}
+
+// Jwt "iss" is "other.com", "issuer" in JwtProvider is not specified,
+// authenticator has a valid provider. The verification is OK.
+TEST_F(AuthenticatorTest, TestWrongIssuerOKWithProvider) {
+  auto& provider = (*proto_config_.mutable_providers())[std::string(ProviderName)];
+  provider.clear_issuer();
+  provider.clear_audiences();
+  createAuthenticator();
+
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _))
+      .WillOnce(Invoke([this](const envoy::config::core::v3::HttpUri&, Tracing::Span&,
+                              JwksFetcher::JwksReceiver& receiver) {
+        receiver.onJwksSuccess(std::move(jwks_));
+      }));
+
+  // Token with other issuer is OK since "issuer" is not specified in the provider.
+  Http::TestRequestHeaderMapImpl headers{
+      {"Authorization", "Bearer " + std::string(OtherGoodToken)}};
+  expectVerifyStatus(Status::Ok, headers);
+}
+
+// Jwt "iss" is "other.com", "issuer" in JwtProvider is not specified,
+// authenticator doesn't have a valid provider. The verification is OK.
+// When "allow_missing" or "allow_failed" is used, authenticator doesn't have a valid provider.
+TEST_F(AuthenticatorTest, TestWrongIssuerOKWithoutProvider) {
+  auto& provider = (*proto_config_.mutable_providers())[std::string(ProviderName)];
+  provider.clear_issuer();
+  provider.clear_audiences();
+  // use authenticator without a valid provider
+  createAuthenticator(nullptr, absl::nullopt);
+
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _))
+      .WillOnce(Invoke([this](const envoy::config::core::v3::HttpUri&, Tracing::Span&,
+                              JwksFetcher::JwksReceiver& receiver) {
+        receiver.onJwksSuccess(std::move(jwks_));
+      }));
+
+  // Token with other issuer is OK since issuer is not specified in the provider.
+  Http::TestRequestHeaderMapImpl headers{
+      {"Authorization", "Bearer " + std::string(OtherGoodToken)}};
+  expectVerifyStatus(Status::Ok, headers);
+}
+
+// Not "iss" in Jwt, "issuer" in JwtProvider is specified,
+// authenticator has a valid provider. The verification is OK.
+TEST_F(AuthenticatorTest, TestJwtWithoutIssWithValidProvider) {
   jwks_ = Jwks::createFrom(ES256PublicKey, Jwks::JWKS);
   EXPECT_TRUE(jwks_->getStatus() == Status::Ok);
 
@@ -185,10 +262,66 @@ TEST_F(AuthenticatorTest, TestJwtWithoutIss) {
         receiver.onJwksSuccess(std::move(jwks_));
       }));
 
-  // Test OK pubkey and its cache
+  Http::TestRequestHeaderMapImpl headers{
+      {"Authorization", "Bearer " + std::string(ES256WithoutIssToken)}};
+  expectVerifyStatus(Status::Ok, headers);
+}
+
+// Not "iss" in Jwt, "issuer" in JwtProvider is specified,
+// authenticator doesn't have a valid provider.
+// It needs to find the first JwtProvider without "issuer" specified.
+// The verification fails with JwtUnknownIssuer.
+// When "allow_missing" or "allow_failed" is used, authenticator doesn't have a valid provider.
+TEST_F(AuthenticatorTest, TestJwtWithoutIssWithoutValidProvider) {
+  createAuthenticator(nullptr, absl::nullopt);
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(0);
+
+  Http::TestRequestHeaderMapImpl headers{
+      {"Authorization", "Bearer " + std::string(ES256WithoutIssToken)}};
+  expectVerifyStatus(Status::JwtUnknownIssuer, headers);
+}
+
+// Not "iss" in Jwt, "issuer" in JwtProvider is not specified,
+// authenticator has a valid provider. The verification is OK
+TEST_F(AuthenticatorTest, TestJwtWithoutIssWithValidProviderNotIssuer) {
+  auto& provider = (*proto_config_.mutable_providers())[std::string(ProviderName)];
+  provider.clear_issuer();
+  createAuthenticator();
+
+  jwks_ = Jwks::createFrom(ES256PublicKey, Jwks::JWKS);
+  EXPECT_TRUE(jwks_->getStatus() == Status::Ok);
+
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _))
+      .WillOnce(Invoke([this](const envoy::config::core::v3::HttpUri&, Tracing::Span&,
+                              JwksFetcher::JwksReceiver& receiver) {
+        receiver.onJwksSuccess(std::move(jwks_));
+      }));
+
   Http::TestRequestHeaderMapImpl headers{
       {"Authorization", "Bearer " + std::string(ES256WithoutIssToken)}};
 
+  expectVerifyStatus(Status::Ok, headers);
+}
+
+// Not "iss" in Jwt, "issuer" in JwtProvider is not specified,
+// authenticator doesn't have a valid provider. The verification is OK
+// When "allow_missing" or "allow_failed" is used, authenticator doesn't have a valid provider.
+TEST_F(AuthenticatorTest, TestJwtWithoutIssWithoutValidProviderNotIssuer) {
+  auto& provider = (*proto_config_.mutable_providers())[std::string(ProviderName)];
+  provider.clear_issuer();
+  createAuthenticator(nullptr, absl::nullopt);
+
+  jwks_ = Jwks::createFrom(ES256PublicKey, Jwks::JWKS);
+  EXPECT_TRUE(jwks_->getStatus() == Status::Ok);
+
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _))
+      .WillOnce(Invoke([this](const envoy::config::core::v3::HttpUri&, Tracing::Span&,
+                              JwksFetcher::JwksReceiver& receiver) {
+        receiver.onJwksSuccess(std::move(jwks_));
+      }));
+
+  Http::TestRequestHeaderMapImpl headers{
+      {"Authorization", "Bearer " + std::string(ES256WithoutIssToken)}};
   expectVerifyStatus(Status::Ok, headers);
 }
 
@@ -204,7 +337,7 @@ TEST_F(AuthenticatorTest, TestMissedJWT) {
 
 // Test multiple tokens; the one from query parameter is bad, verification should fail.
 TEST_F(AuthenticatorTest, TestMultipleJWTOneBadFromQuery) {
-  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(1);
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _));
 
   // headers with multiple tokens: one good, one bad
   Http::TestRequestHeaderMapImpl headers{
@@ -217,7 +350,7 @@ TEST_F(AuthenticatorTest, TestMultipleJWTOneBadFromQuery) {
 
 // Test multiple tokens; the one from header is bad, verification should fail.
 TEST_F(AuthenticatorTest, TestMultipleJWTOneBadFromHeader) {
-  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(1);
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _));
 
   // headers with multiple tokens: one good, one bad
   Http::TestRequestHeaderMapImpl headers{
@@ -230,7 +363,7 @@ TEST_F(AuthenticatorTest, TestMultipleJWTOneBadFromHeader) {
 
 // Test multiple tokens; all are good, verification is ok.
 TEST_F(AuthenticatorTest, TestMultipleJWTAllGood) {
-  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(1);
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _));
 
   // headers with multiple tokens: all are good
   Http::TestRequestHeaderMapImpl headers{
@@ -245,7 +378,7 @@ TEST_F(AuthenticatorTest, TestMultipleJWTAllGood) {
 TEST_F(AuthenticatorTest, TestMultipleJWTOneBadAllowFails) {
   createAuthenticator(nullptr, absl::make_optional<std::string>(ProviderName),
                       /*allow_failed=*/true, /*all_missing=*/false);
-  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(1);
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _));
 
   // headers with multiple tokens: one good, one bad
   Http::TestRequestHeaderMapImpl headers{
@@ -288,7 +421,7 @@ TEST_F(AuthenticatorTest, TestInvalidPrefix) {
 // This test verifies when a JWT is non-expiring without audience specified, JwtAudienceNotAllowed
 // is returned.
 TEST_F(AuthenticatorTest, TestNonExpiringJWT) {
-  EXPECT_CALL(mock_factory_ctx_.cluster_manager_, httpAsyncClientForCluster(_)).Times(0);
+  EXPECT_CALL(mock_factory_ctx_.cluster_manager_.thread_local_cluster_, httpAsyncClient()).Times(0);
 
   Http::TestRequestHeaderMapImpl headers{
       {"Authorization", "Bearer " + std::string(NonExpiringToken)}};
@@ -301,6 +434,23 @@ TEST_F(AuthenticatorTest, TestExpiredJWT) {
 
   Http::TestRequestHeaderMapImpl headers{{"Authorization", "Bearer " + std::string(ExpiredToken)}};
   expectVerifyStatus(Status::JwtExpired, headers);
+}
+
+// This test verifies when a JWT is expired but with a big clock skew.
+TEST_F(AuthenticatorTest, TestExpiredJWTWithABigClockSkew) {
+  auto& provider = (*proto_config_.mutable_providers())[std::string(ProviderName)];
+  // Token is expired at 1205005587, but add clock skew at another 1205005587.
+  provider.set_clock_skew_seconds(1205005587);
+  createAuthenticator();
+
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _))
+      .WillOnce(Invoke([this](const envoy::config::core::v3::HttpUri&, Tracing::Span&,
+                              JwksFetcher::JwksReceiver& receiver) {
+        receiver.onJwksSuccess(std::move(jwks_));
+      }));
+
+  Http::TestRequestHeaderMapImpl headers{{"Authorization", "Bearer " + std::string(ExpiredToken)}};
+  expectVerifyStatus(Status::Ok, headers);
 }
 
 // This test verifies when a JWT is not yet valid, JwtNotYetValid status is returned.
@@ -365,10 +515,10 @@ TEST_F(AuthenticatorTest, TestPubkeyFetchFail) {
 // onComplete() callback should not be called, but internal request->cancel() should be called.
 // Most importantly, no crash.
 TEST_F(AuthenticatorTest, TestOnDestroy) {
-  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _)).Times(1);
+  EXPECT_CALL(*raw_fetcher_, fetch(_, _, _));
 
   // Cancel is called once.
-  EXPECT_CALL(*raw_fetcher_, cancel()).Times(1);
+  EXPECT_CALL(*raw_fetcher_, cancel());
 
   Http::TestRequestHeaderMapImpl headers{{"Authorization", "Bearer " + std::string(GoodToken)}};
   initTokenExtractor();

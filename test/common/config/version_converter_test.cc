@@ -3,9 +3,9 @@
 #include "envoy/config/cluster/v3/cluster.pb.h"
 #include "envoy/service/discovery/v3/discovery.pb.h"
 
-#include "common/config/api_version.h"
-#include "common/config/version_converter.h"
-#include "common/protobuf/well_known.h"
+#include "source/common/config/api_version.h"
+#include "source/common/config/version_converter.h"
+#include "source/common/protobuf/well_known.h"
 
 #include "test/common/config/version_converter.pb.h"
 #include "test/test_common/utility.h"
@@ -32,7 +32,6 @@ bool hasOriginalTypeInformation(const Protobuf::Message& message) {
 TEST(VersionConverterTest, Upgrade) {
   // Create a v2 Cluster message with some fields set.
   API_NO_BOOST(envoy::api::v2::Cluster) source;
-  source.add_hosts();
   source.mutable_load_assignment()->set_cluster_name("bar");
   source.mutable_eds_cluster_config()->set_service_name("foo");
   source.set_drain_connections_on_host_removal(true);
@@ -41,8 +40,6 @@ TEST(VersionConverterTest, Upgrade) {
   VersionConverter::upgrade(source, dst);
   // Verify fields in v3 Cluster.
   EXPECT_TRUE(hasOriginalTypeInformation(dst));
-  EXPECT_FALSE(dst.hidden_envoy_deprecated_hosts().empty());
-  EXPECT_FALSE(hasOriginalTypeInformation(dst.hidden_envoy_deprecated_hosts(0)));
   EXPECT_EQ("bar", dst.load_assignment().cluster_name());
   EXPECT_FALSE(hasOriginalTypeInformation(dst.load_assignment()));
   EXPECT_EQ("foo", dst.eds_cluster_config().service_name());
@@ -64,9 +61,21 @@ TEST(VersionConverterTest, Upgrade) {
 
 // Empty upgrade between version_converter.proto entities. TODO(htuch): consider migrating all the
 // upgrades in this test to version_converter.proto to reduce dependence on APIs that will be
-// removed at EOY.
+// removed at `EOY`.
 TEST(VersionConverterProto, UpgradeNextVersion) {
   test::common::config::PreviousVersion source;
+  test::common::config::NextVersion dst;
+  VersionConverter::upgrade(source, dst);
+}
+
+// Validate that even if we pass in a newer proto version that is being passed off as an older
+// version (e.g. via a type URL mistake), we don't crash. This is a regression test for
+// https://github.com/envoyproxy/envoy/issues/13681.
+TEST(VersionConverterProto, UpgradeWithConfusedTypes) {
+  test::common::config::NextVersion source_next;
+  source_next.mutable_new_message_in_this_version();
+  test::common::config::PreviousVersion source;
+  ASSERT_TRUE(source.ParseFromString(source_next.SerializeAsString()));
   test::common::config::NextVersion dst;
   VersionConverter::upgrade(source, dst);
 }

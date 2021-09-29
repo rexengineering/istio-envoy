@@ -10,8 +10,8 @@
 #include "envoy/upstream/resource_manager.h"
 #include "envoy/upstream/upstream.h"
 
-#include "common/common/assert.h"
-#include "common/common/basic_resource_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/basic_resource_impl.h"
 
 namespace Envoy {
 namespace Upstream {
@@ -24,7 +24,7 @@ struct ManagedResourceImpl : public BasicResourceLimitImpl {
     remaining_.set(max);
   }
 
-  // Upstream::Resource
+  // BasicResourceLimitImpl
   bool canCreate() override { return current_ < max(); }
   void inc() override {
     BasicResourceLimitImpl::inc();

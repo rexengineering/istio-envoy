@@ -6,10 +6,10 @@
 #include "envoy/config/endpoint/v3/endpoint.pb.validate.h"
 #include "envoy/service/discovery/v3/discovery.pb.h"
 
-#include "common/config/filesystem_subscription_impl.h"
-#include "common/config/utility.h"
-#include "common/event/dispatcher_impl.h"
-#include "common/protobuf/utility.h"
+#include "source/common/config/filesystem_subscription_impl.h"
+#include "source/common/config/utility.h"
+#include "source/common/event/dispatcher_impl.h"
+#include "source/common/protobuf/utility.h"
 
 #include "test/common/config/subscription_test_harness.h"
 #include "test/mocks/config/mocks.h"
@@ -54,11 +54,11 @@ public:
   void startSubscription(const std::set<std::string>& cluster_names) override {
     std::ifstream config_file(path_);
     file_at_start_ = config_file.good();
-    subscription_.start(cluster_names);
+    subscription_.start(flattenResources(cluster_names));
   }
 
   void updateResourceInterest(const std::set<std::string>& cluster_names) override {
-    subscription_.updateResourceInterest(cluster_names);
+    subscription_.updateResourceInterest(flattenResources(cluster_names));
   }
 
   void updateFile(const std::string& json, bool run_dispatcher = true) {
@@ -82,7 +82,7 @@ public:
     std::string file_json = "{\"versionInfo\":\"" + version + "\",\"resources\":[";
     for (const auto& cluster : cluster_names) {
       file_json += "{\"@type\":\"type.googleapis.com/"
-                   "envoy.api.v2.ClusterLoadAssignment\",\"clusterName\":\"" +
+                   "envoy.config.endpoint.v3.ClusterLoadAssignment\",\"clusterName\":\"" +
                    cluster + "\"},";
     }
     file_json.pop_back();

@@ -3,7 +3,7 @@
 #include "envoy/config/trace/v3/zipkin.pb.validate.h"
 #include "envoy/registry/registry.h"
 
-#include "extensions/tracers/zipkin/config.h"
+#include "source/extensions/tracers/zipkin/config.h"
 
 #include "test/mocks/server/tracer_factory.h"
 #include "test/mocks/server/tracer_factory_context.h"
@@ -21,16 +21,13 @@ namespace {
 
 TEST(ZipkinTracerConfigTest, ZipkinHttpTracer) {
   NiceMock<Server::Configuration::MockTracerFactoryContext> context;
-
-  EXPECT_CALL(context.server_factory_context_.cluster_manager_, get(Eq("fake_cluster")))
-      .WillRepeatedly(
-          Return(&context.server_factory_context_.cluster_manager_.thread_local_cluster_));
+  context.server_factory_context_.cluster_manager_.initializeClusters({"fake_cluster"}, {});
 
   const std::string yaml_string = R"EOF(
   http:
     name: zipkin
     typed_config:
-      "@type": type.googleapis.com/envoy.config.trace.v2.ZipkinConfig
+      "@type": type.googleapis.com/envoy.config.trace.v3.ZipkinConfig
       collector_cluster: fake_cluster
       collector_endpoint: /api/v1/spans
       collector_endpoint_version: HTTP_JSON
@@ -42,22 +39,19 @@ TEST(ZipkinTracerConfigTest, ZipkinHttpTracer) {
   ZipkinTracerFactory factory;
   auto message = Config::Utility::translateToFactoryConfig(
       configuration.http(), ProtobufMessage::getStrictValidationVisitor(), factory);
-  Tracing::HttpTracerSharedPtr zipkin_tracer = factory.createHttpTracer(*message, context);
+  auto zipkin_tracer = factory.createTracerDriver(*message, context);
   EXPECT_NE(nullptr, zipkin_tracer);
 }
 
 TEST(ZipkinTracerConfigTest, ZipkinHttpTracerWithTypedConfig) {
   NiceMock<Server::Configuration::MockTracerFactoryContext> context;
-
-  EXPECT_CALL(context.server_factory_context_.cluster_manager_, get(Eq("fake_cluster")))
-      .WillRepeatedly(
-          Return(&context.server_factory_context_.cluster_manager_.thread_local_cluster_));
+  context.server_factory_context_.cluster_manager_.initializeClusters({"fake_cluster"}, {});
 
   const std::string yaml_string = R"EOF(
   http:
     name: zipkin
     typed_config:
-      "@type": type.googleapis.com/envoy.config.trace.v2.ZipkinConfig
+      "@type": type.googleapis.com/envoy.config.trace.v3.ZipkinConfig
       collector_cluster: fake_cluster
       collector_endpoint: /api/v2/spans
       collector_endpoint_version: HTTP_PROTO
@@ -69,7 +63,7 @@ TEST(ZipkinTracerConfigTest, ZipkinHttpTracerWithTypedConfig) {
   ZipkinTracerFactory factory;
   auto message = Config::Utility::translateToFactoryConfig(
       configuration.http(), ProtobufMessage::getStrictValidationVisitor(), factory);
-  Tracing::HttpTracerSharedPtr zipkin_tracer = factory.createHttpTracer(*message, context);
+  auto zipkin_tracer = factory.createTracerDriver(*message, context);
   EXPECT_NE(nullptr, zipkin_tracer);
 }
 

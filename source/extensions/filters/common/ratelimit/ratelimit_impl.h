@@ -15,11 +15,10 @@
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/cluster_manager.h"
 
-#include "common/common/logger.h"
-#include "common/grpc/typed_async_client.h"
-#include "common/singleton/const_singleton.h"
-
-#include "extensions/filters/common/ratelimit/ratelimit.h"
+#include "source/common/common/logger.h"
+#include "source/common/grpc/typed_async_client.h"
+#include "source/common/singleton/const_singleton.h"
+#include "source/extensions/filters/common/ratelimit/ratelimit.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -58,7 +57,7 @@ public:
   void cancel() override;
   void limit(RequestCallbacks& callbacks, const std::string& domain,
              const std::vector<Envoy::RateLimit::Descriptor>& descriptors,
-             Tracing::Span& parent_span) override;
+             Tracing::Span& parent_span, const StreamInfo::StreamInfo& stream_info) override;
 
   // Grpc::AsyncRequestCallbacks
   void onCreateInitialMetadata(Http::RequestHeaderMap&) override {}

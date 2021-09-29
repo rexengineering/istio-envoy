@@ -7,8 +7,8 @@
 #include "envoy/config/core/v3/base.pb.h"
 #include "envoy/http/header_map.h"
 
-#include "common/protobuf/protobuf.h"
-#include "common/router/header_formatter.h"
+#include "source/common/protobuf/protobuf.h"
+#include "source/common/router/header_formatter.h"
 
 namespace Envoy {
 namespace Router {
@@ -49,12 +49,28 @@ public:
       const Protobuf::RepeatedPtrField<std::string>& headers_to_remove);
 
   void evaluateHeaders(Http::HeaderMap& headers, const StreamInfo::StreamInfo& stream_info) const;
+  void evaluateHeaders(Http::HeaderMap& headers, const StreamInfo::StreamInfo* stream_info) const;
+
+  /*
+   * Same as evaluateHeaders, but returns the modifications that would have been made rather than
+   * modifying an existing HeaderMap.
+   * @param stream_info contains additional information about the request.
+   * @param do_formatting whether or not to evaluate configured transformations; if false, returns
+   * original values instead.
+   */
+  Http::HeaderTransforms getHeaderTransforms(const StreamInfo::StreamInfo& stream_info,
+                                             bool do_formatting = true) const;
 
 protected:
   HeaderParser() = default;
 
 private:
-  std::vector<std::pair<Http::LowerCaseString, HeaderFormatterPtr>> headers_to_add_;
+  struct HeadersToAddEntry {
+    HeaderFormatterPtr formatter_;
+    const std::string original_value_;
+  };
+
+  std::vector<std::pair<Http::LowerCaseString, HeadersToAddEntry>> headers_to_add_;
   std::vector<Http::LowerCaseString> headers_to_remove_;
 };
 

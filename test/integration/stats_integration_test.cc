@@ -5,8 +5,8 @@
 #include "envoy/stats/scope.h"
 #include "envoy/stats/stats.h"
 
-#include "common/config/well_known_names.h"
-#include "common/memory/stats.h"
+#include "source/common/config/well_known_names.h"
+#include "source/common/memory/stats.h"
 
 #include "test/common/stats/stat_test_utility.h"
 #include "test/config/utility.h"
@@ -266,7 +266,7 @@ TEST_P(ClusterMemoryTestRunner, MemoryLargeClusterSize) {
   // 2020/07/31  12035    37114       38000   Init manager store unready targets in hash map.
   // 2020/08/10  12275    37061       38000   Re-organize tls histogram maps to improve continuity.
   // 2020/08/11  12202    37061       38500   router: add new retry back-off strategy
-  // 2020/09/11  12973                38993   upstream: predictive prefetch
+  // 2020/09/11  12973                38993   upstream: predictive preconnect
   // 2020/10/02  13251                39326   switch to google tcmalloc
 
   // Note: when adjusting this value: EXPECT_MEMORY_EQ is active only in CI
@@ -279,7 +279,7 @@ TEST_P(ClusterMemoryTestRunner, MemoryLargeClusterSize) {
   // vary.
   //
   // If you encounter a failure here, please see
-  // https://github.com/envoyproxy/envoy/blob/master/source/docs/stats.md#stats-memory-tests
+  // https://github.com/envoyproxy/envoy/blob/main/source/docs/stats.md#stats-memory-tests
   // for details on how to fix.
   //
   // We only run the exact test for ipv6 because ipv4 in some cases may allocate a
@@ -288,7 +288,7 @@ TEST_P(ClusterMemoryTestRunner, MemoryLargeClusterSize) {
     // https://github.com/envoyproxy/envoy/issues/12209
     // EXPECT_MEMORY_EQ(m_per_cluster, 37061);
   }
-  EXPECT_MEMORY_LE(m_per_cluster, 39350); // Round up to allow platform variations.
+  EXPECT_MEMORY_LE(m_per_cluster, 40000); // Round up to allow platform variations.
 }
 
 TEST_P(ClusterMemoryTestRunner, MemoryLargeHostSizeWithStats) {
@@ -325,7 +325,7 @@ TEST_P(ClusterMemoryTestRunner, MemoryLargeHostSizeWithStats) {
   // at the logs.
   //
   // If you encounter a failure here, please see
-  // https://github.com/envoyproxy/envoy/blob/master/source/docs/stats.md#stats-memory-tests
+  // https://github.com/envoyproxy/envoy/blob/main/source/docs/stats.md#stats-memory-tests
   // for details on how to fix.
   //
   // We only run the exact test for ipv6 because ipv4 in some cases may allocate a
@@ -334,7 +334,7 @@ TEST_P(ClusterMemoryTestRunner, MemoryLargeHostSizeWithStats) {
     // https://github.com/envoyproxy/envoy/issues/12209
     // EXPECT_MEMORY_EQ(m_per_host, 1380);
   }
-  EXPECT_MEMORY_LE(m_per_host, 1800); // Round up to allow platform variations.
+  EXPECT_MEMORY_LE(m_per_host, 2000); // Round up to allow platform variations.
 }
 
 } // namespace

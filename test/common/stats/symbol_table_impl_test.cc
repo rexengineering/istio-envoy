@@ -1,9 +1,9 @@
 #include <string>
 
-#include "common/common/macros.h"
-#include "common/common/mutex_tracer_impl.h"
-#include "common/memory/stats.h"
-#include "common/stats/symbol_table_impl.h"
+#include "source/common/common/macros.h"
+#include "source/common/common/mutex_tracer_impl.h"
+#include "source/common/memory/stats.h"
+#include "source/common/stats/symbol_table_impl.h"
 
 #include "test/common/stats/stat_test_utility.h"
 #include "test/test_common/logging.h"
@@ -694,6 +694,20 @@ TEST_F(StatNameTest, StatNameEmptyEquivalent) {
   EXPECT_NE(empty2.hash(), non_empty.hash());
 }
 
+TEST_F(StatNameTest, StartsWith) {
+  StatName prefix = makeStat("prefix");
+  EXPECT_TRUE(prefix.startsWith(prefix));
+  EXPECT_TRUE(makeStat("prefix").startsWith(prefix));
+  EXPECT_TRUE(makeStat("prefix.foo").startsWith(prefix));
+  EXPECT_TRUE(makeStat("prefix.foo.bar").startsWith(prefix));
+  EXPECT_FALSE(makeStat("").startsWith(prefix));
+  EXPECT_FALSE(makeStat("foo").startsWith(prefix));
+  StatNameDynamicPool dynamic(table_);
+  StatName dynamic_prefix = dynamic.add("prefix");
+  EXPECT_FALSE(dynamic_prefix.startsWith(prefix));
+  EXPECT_FALSE(dynamic_prefix.startsWith(dynamic_prefix));
+}
+
 TEST_F(StatNameTest, SupportsAbslHash) {
   EXPECT_TRUE(absl::VerifyTypeImplementsAbslHashCorrectly({
       StatName(),
@@ -704,13 +718,12 @@ TEST_F(StatNameTest, SupportsAbslHash) {
 
 // Tests the memory savings realized from using symbol tables with 1k
 // clusters. This test shows the memory drops from almost 8M to less than
-// 2M. Note that only SymbolTableImpl is tested for memory consumption,
-// and not FakeSymbolTableImpl.
+// 2M.
 TEST(SymbolTableTest, Memory) {
   // Tests a stat-name allocation strategy.
   auto test_memory_usage = [](std::function<void(absl::string_view)> fn) -> size_t {
     TestUtil::MemoryTest memory_test;
-    TestUtil::forEachSampleStat(1000, fn);
+    TestUtil::forEachSampleStat(1000, true, fn);
     return memory_test.consumedBytes();
   };
 

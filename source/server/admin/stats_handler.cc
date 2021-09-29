@@ -1,14 +1,13 @@
-#include "server/admin/stats_handler.h"
+#include "source/server/admin/stats_handler.h"
 
 #include "envoy/admin/v3/mutex_stats.pb.h"
 
-#include "common/common/empty_string.h"
-#include "common/html/utility.h"
-#include "common/http/headers.h"
-#include "common/http/utility.h"
-
-#include "server/admin/prometheus_stats.h"
-#include "server/admin/utils.h"
+#include "source/common/common/empty_string.h"
+#include "source/common/html/utility.h"
+#include "source/common/http/headers.h"
+#include "source/common/http/utility.h"
+#include "source/server/admin/prometheus_stats.h"
+#include "source/server/admin/utils.h"
 
 namespace Envoy {
 namespace Server {
@@ -71,7 +70,10 @@ Http::Code StatsHandler::handlerStatsRecentLookupsEnable(absl::string_view,
 Http::Code StatsHandler::handlerStats(absl::string_view url,
                                       Http::ResponseHeaderMap& response_headers,
                                       Buffer::Instance& response, AdminStream& admin_stream) {
-  Http::Code rc = Http::Code::OK;
+  if (server_.statsConfig().flushOnAdmin()) {
+    server_.flushStats();
+  }
+
   const Http::Utility::QueryParams params = Http::Utility::parseAndDecodeQueryString(url);
 
   const bool used_only = params.find("usedonly") != params.end();
@@ -101,38 +103,27 @@ Http::Code StatsHandler::handlerStats(absl::string_view url,
     }
   }
 
-  if (const auto format_value = Utility::formatParam(params)) {
-    if (format_value.value() == "json") {
-      response_headers.setReferenceContentType(Http::Headers::get().ContentTypeValues.Json);
-      response.add(
-          statsAsJson(all_stats, text_readouts, server_.stats().histograms(), used_only, regex));
-    } else if (format_value.value() == "prometheus") {
-      return handlerPrometheusStats(url, response_headers, response, admin_stream);
-    } else {
-      response.add("usage: /stats?format=json  or /stats?format=prometheus \n");
-      response.add("\n");
-      rc = Http::Code::NotFound;
-    }
-  } else { // Display plain stats if format query param is not there.
-    for (const auto& text_readout : text_readouts) {
-      response.add(fmt::format("{}: \"{}\"\n", text_readout.first,
-                               Html::Utility::sanitize(text_readout.second)));
-    }
-    for (const auto& stat : all_stats) {
-      response.add(fmt::format("{}: {}\n", stat.first, stat.second));
-    }
-    std::map<std::string, std::string> all_histograms;
-    for (const Stats::ParentHistogramSharedPtr& histogram : server_.stats().histograms()) {
-      if (shouldShowMetric(*histogram, used_only, regex)) {
-        auto insert = all_histograms.emplace(histogram->name(), histogram->quantileSummary());
-        ASSERT(insert.second); // No duplicates expected.
-      }
-    }
-    for (const auto& histogram : all_histograms) {
-      response.add(fmt::format("{}: {}\n", histogram.first, histogram.second));
-    }
+  absl::optional<std::string> format_value = Utility::formatParam(params);
+  if (!format_value.has_value()) {
+    // Display plain stats if format query param is not there.
+    statsAsText(all_stats, text_readouts, server_.stats().histograms(), used_only, regex, response);
+    return Http::Code::OK;
   }
-  return rc;
+
+  if (format_value.value() == "json") {
+    response_headers.setReferenceContentType(Http::Headers::get().ContentTypeValues.Json);
+    response.add(
+        statsAsJson(all_stats, text_readouts, server_.stats().histograms(), used_only, regex));
+    return Http::Code::OK;
+  }
+
+  if (format_value.value() == "prometheus") {
+    return handlerPrometheusStats(url, response_headers, response, admin_stream);
+  }
+
+  response.add("usage: /stats?format=json  or /stats?format=prometheus \n");
+  response.add("\n");
+  return Http::Code::NotFound;
 }
 
 Http::Code StatsHandler::handlerPrometheusStats(absl::string_view path_and_query,
@@ -163,7 +154,7 @@ Http::Code StatsHandler::handlerContention(absl::string_view,
     mutex_stats.set_num_contentions(server_.mutexTracer()->numContentions());
     mutex_stats.set_current_wait_cycles(server_.mutexTracer()->currentWaitCycles());
     mutex_stats.set_lifetime_wait_cycles(server_.mutexTracer()->lifetimeWaitCycles());
-    response.add(MessageUtil::getJsonStringFromMessage(mutex_stats, true, true));
+    response.add(MessageUtil::getJsonStringFromMessageOrError(mutex_stats, true, true));
   } else {
     response.add("Mutex contention tracing is not enabled. To enable, run Envoy with flag "
                  "--enable-mutex-tracing.");
@@ -171,11 +162,36 @@ Http::Code StatsHandler::handlerContention(absl::string_view,
   return Http::Code::OK;
 }
 
+void StatsHandler::statsAsText(const std::map<std::string, uint64_t>& all_stats,
+                               const std::map<std::string, std::string>& text_readouts,
+                               const std::vector<Stats::ParentHistogramSharedPtr>& histograms,
+                               bool used_only, const absl::optional<std::regex>& regex,
+                               Buffer::Instance& response) {
+  // Display plain stats if format query param is not there.
+  for (const auto& text_readout : text_readouts) {
+    response.add(fmt::format("{}: \"{}\"\n", text_readout.first,
+                             Html::Utility::sanitize(text_readout.second)));
+  }
+  for (const auto& stat : all_stats) {
+    response.add(fmt::format("{}: {}\n", stat.first, stat.second));
+  }
+  std::map<std::string, std::string> all_histograms;
+  for (const Stats::ParentHistogramSharedPtr& histogram : histograms) {
+    if (shouldShowMetric(*histogram, used_only, regex)) {
+      auto insert = all_histograms.emplace(histogram->name(), histogram->quantileSummary());
+      ASSERT(insert.second); // No duplicates expected.
+    }
+  }
+  for (const auto& histogram : all_histograms) {
+    response.add(fmt::format("{}: {}\n", histogram.first, histogram.second));
+  }
+}
+
 std::string
 StatsHandler::statsAsJson(const std::map<std::string, uint64_t>& all_stats,
                           const std::map<std::string, std::string>& text_readouts,
                           const std::vector<Stats::ParentHistogramSharedPtr>& all_histograms,
-                          const bool used_only, const absl::optional<std::regex> regex,
+                          const bool used_only, const absl::optional<std::regex>& regex,
                           const bool pretty_print) {
 
   ProtobufWkt::Struct document;
@@ -249,7 +265,7 @@ StatsHandler::statsAsJson(const std::map<std::string, uint64_t>& all_stats,
   auto* document_fields = document.mutable_fields();
   (*document_fields)["stats"] = ValueUtil::listValue(stats_array);
 
-  return MessageUtil::getJsonStringFromMessage(document, pretty_print, true);
+  return MessageUtil::getJsonStringFromMessageOrDie(document, pretty_print, true);
 }
 
 } // namespace Server

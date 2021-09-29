@@ -3,9 +3,10 @@
 #include "envoy/extensions/filters/network/ext_authz/v3/ext_authz.pb.validate.h"
 #include "envoy/stats/scope.h"
 
-#include "extensions/filters/network/ext_authz/config.h"
+#include "source/extensions/filters/network/ext_authz/config.h"
 
 #include "test/mocks/server/factory_context.h"
+#include "test/test_common/test_runtime.h"
 #include "test/test_common/utility.h"
 
 #include "gmock/gmock.h"
@@ -21,6 +22,10 @@ namespace ExtAuthz {
 
 namespace {
 void expectCorrectProto(envoy::config::core::v3::ApiVersion api_version) {
+  std::unique_ptr<TestDeprecatedV2Api> _deprecated_v2_api;
+  if (api_version != envoy::config::core::v3::ApiVersion::V3) {
+    _deprecated_v2_api = std::make_unique<TestDeprecatedV2Api>();
+  }
   std::string yaml = R"EOF(
   grpc_service:
     google_grpc:
@@ -37,7 +42,9 @@ void expectCorrectProto(envoy::config::core::v3::ApiVersion api_version) {
       fmt::format(yaml, TestUtility::getVersionStringFromApiVersion(api_version)), *proto_config);
 
   NiceMock<Server::Configuration::MockFactoryContext> context;
-
+  testing::StrictMock<Server::Configuration::MockServerFactoryContext> server_context;
+  EXPECT_CALL(context, getServerFactoryContext())
+      .WillRepeatedly(testing::ReturnRef(server_context));
   EXPECT_CALL(context.cluster_manager_.async_client_manager_, factoryForGrpcService(_, _, _))
       .WillOnce(Invoke([](const envoy::config::core::v3::GrpcService&, Stats::Scope&, bool) {
         return std::make_unique<NiceMock<Grpc::MockAsyncClientFactory>>();
@@ -51,14 +58,20 @@ void expectCorrectProto(envoy::config::core::v3::ApiVersion api_version) {
 
 TEST(ExtAuthzFilterConfigTest, ValidateFail) {
   NiceMock<Server::Configuration::MockFactoryContext> context;
-  EXPECT_THROW(ExtAuthzConfigFactory().createFilterFactoryFromProto(
-                   envoy::extensions::filters::network::ext_authz::v3::ExtAuthz(), context),
+  testing::StrictMock<Server::Configuration::MockServerFactoryContext> server_context;
+  EXPECT_CALL(context, getServerFactoryContext())
+      .WillRepeatedly(testing::ReturnRef(server_context));
+  envoy::extensions::filters::network::ext_authz::v3::ExtAuthz config;
+  config.set_transport_api_version(envoy::config::core::v3::ApiVersion::V3);
+  EXPECT_THROW(ExtAuthzConfigFactory().createFilterFactoryFromProto(config, context),
                ProtoValidationException);
 }
 
 TEST(ExtAuthzFilterConfigTest, ExtAuthzCorrectProto) {
+#ifndef ENVOY_DISABLE_DEPRECATED_FEATURES
   expectCorrectProto(envoy::config::core::v3::ApiVersion::AUTO);
   expectCorrectProto(envoy::config::core::v3::ApiVersion::V2);
+#endif
   expectCorrectProto(envoy::config::core::v3::ApiVersion::V3);
 }
 

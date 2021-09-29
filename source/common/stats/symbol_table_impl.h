@@ -10,14 +10,14 @@
 #include "envoy/common/exception.h"
 #include "envoy/stats/symbol_table.h"
 
-#include "common/common/assert.h"
-#include "common/common/hash.h"
-#include "common/common/lock_guard.h"
-#include "common/common/mem_block_builder.h"
-#include "common/common/non_copyable.h"
-#include "common/common/thread.h"
-#include "common/common/utility.h"
-#include "common/stats/recent_lookups.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/hash.h"
+#include "source/common/common/lock_guard.h"
+#include "source/common/common/mem_block_builder.h"
+#include "source/common/common/non_copyable.h"
+#include "source/common/common/thread.h"
+#include "source/common/common/utility.h"
+#include "source/common/stats/recent_lookups.h"
 
 #include "absl/container/fixed_array.h"
 #include "absl/container/flat_hash_map.h"
@@ -186,8 +186,6 @@ public:
   void populateList(const StatName* names, uint32_t num_names, StatNameList& list) override;
   StoragePtr encode(absl::string_view name) override;
   StoragePtr makeDynamicStorage(absl::string_view name) override;
-  void callWithStringView(StatName stat_name,
-                          const std::function<void(absl::string_view)>& fn) const override;
 
 #ifndef ENVOY_CONFIG_COVERAGE
   void debugPrint() const override;
@@ -458,6 +456,16 @@ public:
    */
   bool empty() const { return size_and_data_ == nullptr || dataSize() == 0; }
 
+  /**
+   * Determines whether this starts with the prefix. Note: dynamic segments
+   * are not supported in the current implementation; this matching only works
+   * for symbolic segments. However it OK for this to include dynamic segments
+   * following the prefix.
+   *
+   * @param symbolic_prefix the prefix, which must not contain dynamic segments.
+   */
+  bool startsWith(StatName symbolic_prefix) const;
+
 private:
   /**
    * Casts the raw data as a string_view. Note that this string_view will not
@@ -499,6 +507,8 @@ public:
       : StatNameStorage(name, table), symbol_table_(table) {}
   StatNameManagedStorage(StatNameManagedStorage&& src) noexcept
       : StatNameStorage(std::move(src)), symbol_table_(src.symbol_table_) {}
+  StatNameManagedStorage(StatName src, SymbolTable& table) noexcept
+      : StatNameStorage(src, table), symbol_table_(table) {}
 
   ~StatNameManagedStorage() { free(symbol_table_); }
 
@@ -585,7 +595,7 @@ private:
  * SymbolTable lock, but tokens are not shared across StatNames.
  *
  * The SymbolTable is required as a constructor argument to assist in encoding
- * the stat-names, which differs between FakeSymbolTableImpl and SymbolTableImpl.
+ * the stat-names.
  *
  * Example usage:
  *   StatNameDynamicPool pool(symbol_table);
@@ -652,7 +662,6 @@ public:
   void clear(SymbolTable& symbol_table);
 
 private:
-  friend class FakeSymbolTableImpl;
   friend class SymbolTableImpl;
 
   /**
@@ -666,10 +675,8 @@ private:
    * ...
    *
    *
-   * For FakeSymbolTableImpl, each symbol is a single char, casted into a
-   * uint8_t. For SymbolTableImpl, each symbol is 1 or more bytes, in a
-   * variable-length encoding. See SymbolTableImpl::Encoding::addSymbol for
-   * details.
+   * For SymbolTableImpl, each symbol is 1 or more bytes, in a variable-length
+   * encoding. See SymbolTableImpl::Encoding::addSymbol for details.
    */
   void moveStorageIntoList(SymbolTable::StoragePtr&& storage) { storage_ = std::move(storage); }
 
@@ -841,13 +848,11 @@ public:
   }
 
 private:
-  friend class FakeSymbolTableImpl;
   friend class SymbolTableImpl;
 
   StatNameSet(SymbolTable& symbol_table, absl::string_view name);
 
   const std::string name_;
-  Stats::SymbolTable& symbol_table_;
   Stats::StatNamePool pool_ ABSL_GUARDED_BY(mutex_);
   mutable absl::Mutex mutex_;
   using StringStatNameMap = absl::flat_hash_map<std::string, Stats::StatName>;

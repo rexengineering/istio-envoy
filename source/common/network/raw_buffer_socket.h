@@ -4,7 +4,7 @@
 #include "envoy/network/connection.h"
 #include "envoy/network/transport_socket.h"
 
-#include "common/common/logger.h"
+#include "source/common/common/logger.h"
 
 namespace Envoy {
 namespace Network {
@@ -21,6 +21,7 @@ public:
   IoResult doRead(Buffer::Instance& buffer) override;
   IoResult doWrite(Buffer::Instance& buffer, bool end_stream) override;
   Ssl::ConnectionInfoConstSharedPtr ssl() const override { return nullptr; }
+  bool startSecureTransport() override { return false; }
 
 private:
   TransportSocketCallbacks* callbacks_{};
@@ -30,7 +31,8 @@ private:
 class RawBufferSocketFactory : public TransportSocketFactory {
 public:
   // Network::TransportSocketFactory
-  TransportSocketPtr createTransportSocket(TransportSocketOptionsSharedPtr options) const override;
+  TransportSocketPtr
+  createTransportSocket(TransportSocketOptionsConstSharedPtr options) const override;
   bool implementsSecureTransport() const override;
   bool usesProxyProtocolOptions() const override { return false; }
 };

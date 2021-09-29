@@ -5,12 +5,12 @@
 #include "envoy/common/exception.h"
 #include "envoy/common/platform.h"
 
-#include "common/api/os_sys_calls_impl.h"
-#include "common/common/fmt.h"
-#include "common/common/utility.h"
-#include "common/network/address_impl.h"
-#include "common/network/listen_socket_impl.h"
-#include "common/network/utility.h"
+#include "source/common/api/os_sys_calls_impl.h"
+#include "source/common/common/fmt.h"
+#include "source/common/common/utility.h"
+#include "source/common/network/address_impl.h"
+#include "source/common/network/listen_socket_impl.h"
+#include "source/common/network/utility.h"
 
 #include "test/mocks/api/mocks.h"
 #include "test/test_common/environment.h"
@@ -49,7 +49,7 @@ void testSocketBindAndConnect(Network::Address::IpVersion ip_version, bool v6onl
   ASSERT_NE(addr_port->ip(), nullptr);
 
   // Create a socket on which we'll listen for connections from clients.
-  SocketImpl sock(Socket::Type::Stream, addr_port);
+  SocketImpl sock(Socket::Type::Stream, addr_port, nullptr);
   EXPECT_TRUE(sock.ioHandle().isOpen()) << addr_port->asString();
 
   // Check that IPv6 sockets accept IPv6 connections only.
@@ -71,7 +71,7 @@ void testSocketBindAndConnect(Network::Address::IpVersion ip_version, bool v6onl
 
   auto client_connect = [](Address::InstanceConstSharedPtr addr_port) {
     // Create a client socket and connect to the server.
-    SocketImpl client_sock(Socket::Type::Stream, addr_port);
+    SocketImpl client_sock(Socket::Type::Stream, addr_port, nullptr);
 
     EXPECT_TRUE(client_sock.ioHandle().isOpen()) << addr_port->asString();
 
@@ -335,6 +335,8 @@ TEST(InteralInstanceTest, Basic) {
   EXPECT_EQ(static_cast<decltype(address.sockAddrLen())>(0), address.sockAddrLen());
 }
 
+// Excluding Windows; chmod(2) against Windows AF_UNIX socket files succeeds,
+// but stat(2) against those returns ENOENT.
 #ifndef WIN32
 TEST(PipeInstanceTest, BasicPermission) {
   std::string path = TestEnvironment::unixDomainSocketPath("foo.sock");
@@ -342,7 +344,7 @@ TEST(PipeInstanceTest, BasicPermission) {
   const mode_t mode = 0777;
   PipeInstance pipe(path, mode);
   InstanceConstSharedPtr address = std::make_shared<PipeInstance>(pipe);
-  SocketImpl sock(Socket::Type::Stream, address);
+  SocketImpl sock(Socket::Type::Stream, address, nullptr);
 
   EXPECT_TRUE(sock.ioHandle().isOpen()) << pipe.asString();
 
@@ -369,7 +371,7 @@ TEST(PipeInstanceTest, PermissionFail) {
   const mode_t mode = 0777;
   PipeInstance pipe(path, mode);
   InstanceConstSharedPtr address = std::make_shared<PipeInstance>(pipe);
-  SocketImpl sock(Socket::Type::Stream, address);
+  SocketImpl sock(Socket::Type::Stream, address, nullptr);
 
   EXPECT_TRUE(sock.ioHandle().isOpen()) << pipe.asString();
 
@@ -441,7 +443,7 @@ TEST(PipeInstanceTest, UnlinksExistingFile) {
   const auto bind_uds_socket = [](const std::string& path) {
     PipeInstance pipe(path);
     InstanceConstSharedPtr address = std::make_shared<PipeInstance>(pipe);
-    SocketImpl sock(Socket::Type::Stream, address);
+    SocketImpl sock(Socket::Type::Stream, address, nullptr);
 
     EXPECT_TRUE(sock.ioHandle().isOpen()) << pipe.asString();
 
@@ -464,15 +466,15 @@ TEST(AddressFromSockAddrDeathTest, IPv4) {
   EXPECT_EQ(1, inet_pton(AF_INET, "1.2.3.4", &sin.sin_addr));
   sin.sin_port = htons(6502);
 
-  EXPECT_DEATH(addressFromSockAddr(ss, 1), "ss_len");
-  EXPECT_DEATH(addressFromSockAddr(ss, sizeof(sockaddr_in) - 1), "ss_len");
-  EXPECT_DEATH(addressFromSockAddr(ss, sizeof(sockaddr_in) + 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, sizeof(sockaddr_in) - 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, sizeof(sockaddr_in) + 1), "ss_len");
 
-  EXPECT_EQ("1.2.3.4:6502", addressFromSockAddr(ss, sizeof(sockaddr_in))->asString());
+  EXPECT_EQ("1.2.3.4:6502", (*addressFromSockAddr(ss, sizeof(sockaddr_in)))->asString());
 
   // Invalid family.
   sin.sin_family = AF_UNSPEC;
-  EXPECT_THROW(addressFromSockAddr(ss, sizeof(sockaddr_in)), EnvoyException);
+  EXPECT_FALSE(addressFromSockAddr(ss, sizeof(sockaddr_in)).ok());
 }
 
 TEST(AddressFromSockAddrDeathTest, IPv6) {
@@ -483,20 +485,22 @@ TEST(AddressFromSockAddrDeathTest, IPv6) {
   EXPECT_EQ(1, inet_pton(AF_INET6, "01:023::00Ef", &sin6.sin6_addr));
   sin6.sin6_port = htons(32000);
 
-  EXPECT_DEATH(addressFromSockAddr(ss, 1), "ss_len");
-  EXPECT_DEATH(addressFromSockAddr(ss, sizeof(sockaddr_in6) - 1), "ss_len");
-  EXPECT_DEATH(addressFromSockAddr(ss, sizeof(sockaddr_in6) + 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, sizeof(sockaddr_in6) - 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, sizeof(sockaddr_in6) + 1), "ss_len");
 
-  EXPECT_EQ("[1:23::ef]:32000", addressFromSockAddr(ss, sizeof(sockaddr_in6))->asString());
+  EXPECT_EQ("[1:23::ef]:32000", (*addressFromSockAddr(ss, sizeof(sockaddr_in6)))->asString());
 
   // Test that IPv4-mapped IPv6 address is returned as an Ipv4Instance when 'v6only' parameter is
   // 'false', but not otherwise.
   EXPECT_EQ(1, inet_pton(AF_INET6, "::ffff:192.0.2.128", &sin6.sin6_addr));
-  EXPECT_EQ(IpVersion::v4, addressFromSockAddr(ss, sizeof(sockaddr_in6), false)->ip()->version());
-  EXPECT_EQ("192.0.2.128:32000", addressFromSockAddr(ss, sizeof(sockaddr_in6), false)->asString());
-  EXPECT_EQ(IpVersion::v6, addressFromSockAddr(ss, sizeof(sockaddr_in6), true)->ip()->version());
+  EXPECT_EQ(IpVersion::v4,
+            (*addressFromSockAddr(ss, sizeof(sockaddr_in6), false))->ip()->version());
+  EXPECT_EQ("192.0.2.128:32000",
+            (*addressFromSockAddr(ss, sizeof(sockaddr_in6), false))->asString());
+  EXPECT_EQ(IpVersion::v6, (*addressFromSockAddr(ss, sizeof(sockaddr_in6), true))->ip()->version());
   EXPECT_EQ("[::ffff:192.0.2.128]:32000",
-            addressFromSockAddr(ss, sizeof(sockaddr_in6), true)->asString());
+            (*addressFromSockAddr(ss, sizeof(sockaddr_in6), true))->asString());
 }
 
 TEST(AddressFromSockAddrDeathTest, Pipe) {
@@ -506,20 +510,20 @@ TEST(AddressFromSockAddrDeathTest, Pipe) {
 
   StringUtil::strlcpy(sun.sun_path, "/some/path", sizeof sun.sun_path);
 
-  EXPECT_DEATH(addressFromSockAddr(ss, 1), "ss_len");
-  EXPECT_DEATH(addressFromSockAddr(ss, offsetof(struct sockaddr_un, sun_path)), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, 1), "ss_len");
+  EXPECT_DEATH(*addressFromSockAddr(ss, offsetof(struct sockaddr_un, sun_path)), "ss_len");
 
   socklen_t ss_len = offsetof(struct sockaddr_un, sun_path) + 1 + strlen(sun.sun_path);
-  EXPECT_EQ("/some/path", addressFromSockAddr(ss, ss_len)->asString());
+  EXPECT_EQ("/some/path", (*addressFromSockAddr(ss, ss_len))->asString());
 
   // Abstract socket namespace.
   StringUtil::strlcpy(&sun.sun_path[1], "/some/abstract/path", sizeof sun.sun_path);
   sun.sun_path[0] = '\0';
   ss_len = offsetof(struct sockaddr_un, sun_path) + 1 + strlen("/some/abstract/path");
 #if defined(__linux__)
-  EXPECT_EQ("@/some/abstract/path", addressFromSockAddr(ss, ss_len)->asString());
+  EXPECT_EQ("@/some/abstract/path", (*addressFromSockAddr(ss, ss_len))->asString());
 #else
-  EXPECT_THROW(addressFromSockAddr(ss, ss_len), EnvoyException);
+  EXPECT_FALSE(addressFromSockAddr(ss, ss_len).ok());
 #endif
 }
 

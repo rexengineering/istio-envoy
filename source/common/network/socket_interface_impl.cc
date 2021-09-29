@@ -1,12 +1,12 @@
-#include "common/network/socket_interface_impl.h"
+#include "source/common/network/socket_interface_impl.h"
 
 #include "envoy/common/exception.h"
 #include "envoy/extensions/network/socket_interface/v3/default_socket_interface.pb.h"
 
-#include "common/api/os_sys_calls_impl.h"
-#include "common/common/assert.h"
-#include "common/common/utility.h"
-#include "common/network/io_socket_handle_impl.h"
+#include "source/common/api/os_sys_calls_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/utility.h"
+#include "source/common/network/io_socket_handle_impl.h"
 
 namespace Envoy {
 namespace Network {
@@ -77,10 +77,6 @@ IoHandlePtr SocketInterfaceImpl::socket(Socket::Type socket_type,
     RELEASE_ASSERT(!SOCKET_FAILURE(result.rc_), "");
   }
   return io_handle;
-}
-
-IoHandlePtr SocketInterfaceImpl::socket(os_fd_t fd) {
-  return std::make_unique<IoSocketHandleImpl>(fd);
 }
 
 bool SocketInterfaceImpl::ipFamilySupported(int domain) {

@@ -4,8 +4,9 @@
 #include <vector>
 
 #include "envoy/ratelimit/ratelimit.h"
+#include "envoy/stream_info/stream_info.h"
 
-#include "extensions/filters/common/ratelimit/ratelimit.h"
+#include "source/extensions/filters/common/ratelimit/ratelimit.h"
 
 #include "gmock/gmock.h"
 
@@ -25,7 +26,7 @@ public:
   MOCK_METHOD(void, limit,
               (RequestCallbacks & callbacks, const std::string& domain,
                const std::vector<Envoy::RateLimit::Descriptor>& descriptors,
-               Tracing::Span& parent_span));
+               Tracing::Span& parent_span, const StreamInfo::StreamInfo& stream_info));
 };
 
 } // namespace RateLimit

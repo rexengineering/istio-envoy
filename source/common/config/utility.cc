@@ -1,4 +1,4 @@
-#include "common/config/utility.h"
+#include "source/common/config/utility.h"
 
 #include "envoy/config/bootstrap/v3/bootstrap.pb.h"
 #include "envoy/config/cluster/v3/cluster.pb.h"
@@ -9,18 +9,18 @@
 #include "envoy/config/endpoint/v3/endpoint_components.pb.h"
 #include "envoy/stats/scope.h"
 
-#include "common/common/assert.h"
-#include "common/common/fmt.h"
-#include "common/common/hex.h"
-#include "common/common/utility.h"
-#include "common/config/api_type_oracle.h"
-#include "common/config/version_converter.h"
-#include "common/config/well_known_names.h"
-#include "common/protobuf/protobuf.h"
-#include "common/protobuf/utility.h"
-#include "common/stats/histogram_impl.h"
-#include "common/stats/stats_matcher_impl.h"
-#include "common/stats/tag_producer_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/fmt.h"
+#include "source/common/common/hex.h"
+#include "source/common/common/utility.h"
+#include "source/common/config/api_type_oracle.h"
+#include "source/common/config/version_converter.h"
+#include "source/common/config/well_known_names.h"
+#include "source/common/protobuf/protobuf.h"
+#include "source/common/protobuf/utility.h"
+#include "source/common/stats/histogram_impl.h"
+#include "source/common/stats/stats_matcher_impl.h"
+#include "source/common/stats/tag_producer_impl.h"
 
 namespace Envoy {
 namespace Config {
@@ -44,12 +44,8 @@ void Utility::translateApiConfigSource(
     envoy::config::core::v3::GrpcService* grpc_service = api_config_source.add_grpc_services();
     grpc_service->mutable_envoy_grpc()->set_cluster_name(cluster);
   } else {
-    if (api_type == ApiType::get().UnsupportedRestLegacy) {
-      api_config_source.set_api_type(envoy::config::core::v3::ApiConfigSource::
-                                         hidden_envoy_deprecated_UNSUPPORTED_REST_LEGACY);
-    } else if (api_type == ApiType::get().Rest) {
-      api_config_source.set_api_type(envoy::config::core::v3::ApiConfigSource::REST);
-    }
+    ASSERT(api_type == ApiType::get().Rest);
+    api_config_source.set_api_type(envoy::config::core::v3::ApiConfigSource::REST);
     api_config_source.add_cluster_names(cluster);
   }
 
@@ -57,25 +53,29 @@ void Utility::translateApiConfigSource(
       Protobuf::util::TimeUtil::MillisecondsToDuration(refresh_delay_ms));
 }
 
-void Utility::checkCluster(absl::string_view error_prefix, absl::string_view cluster_name,
-                           Upstream::ClusterManager& cm, bool allow_added_via_api) {
-  Upstream::ThreadLocalCluster* cluster = cm.get(cluster_name);
-  if (cluster == nullptr) {
+Upstream::ClusterConstOptRef Utility::checkCluster(absl::string_view error_prefix,
+                                                   absl::string_view cluster_name,
+                                                   Upstream::ClusterManager& cm,
+                                                   bool allow_added_via_api) {
+  const auto cluster = cm.clusters().getCluster(cluster_name);
+  if (!cluster.has_value()) {
     throw EnvoyException(fmt::format("{}: unknown cluster '{}'", error_prefix, cluster_name));
   }
 
-  if (!allow_added_via_api && cluster->info()->addedViaApi()) {
+  if (!allow_added_via_api && cluster->get().info()->addedViaApi()) {
     throw EnvoyException(fmt::format(
         "{}: invalid cluster '{}': currently only static (non-CDS) clusters are supported",
         error_prefix, cluster_name));
   }
+  return cluster;
 }
 
-void Utility::checkClusterAndLocalInfo(absl::string_view error_prefix,
-                                       absl::string_view cluster_name, Upstream::ClusterManager& cm,
-                                       const LocalInfo::LocalInfo& local_info) {
-  checkCluster(error_prefix, cluster_name, cm);
+Upstream::ClusterConstOptRef
+Utility::checkClusterAndLocalInfo(absl::string_view error_prefix, absl::string_view cluster_name,
+                                  Upstream::ClusterManager& cm,
+                                  const LocalInfo::LocalInfo& local_info) {
   checkLocalInfo(error_prefix, local_info);
+  return checkCluster(error_prefix, cluster_name, cm);
 }
 
 void Utility::checkLocalInfo(absl::string_view error_prefix,
@@ -149,6 +149,13 @@ void Utility::validateClusterName(const Upstream::ClusterManager::ClusterSet& pr
 void Utility::checkApiConfigSourceSubscriptionBackingCluster(
     const Upstream::ClusterManager::ClusterSet& primary_clusters,
     const envoy::config::core::v3::ApiConfigSource& api_config_source) {
+  // We don't need to check backing sources for ADS sources, the backing cluster must be verified in
+  // the ads_config.
+  if (api_config_source.api_type() == envoy::config::core::v3::ApiConfigSource::AGGREGATED_GRPC ||
+      api_config_source.api_type() ==
+          envoy::config::core::v3::ApiConfigSource::AGGREGATED_DELTA_GRPC) {
+    return;
+  }
   Utility::checkApiConfigSourceNames(api_config_source);
 
   const bool is_grpc =
@@ -216,8 +223,9 @@ Utility::createTagProducer(const envoy::config::bootstrap::v3::Bootstrap& bootst
 }
 
 Stats::StatsMatcherPtr
-Utility::createStatsMatcher(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
-  return std::make_unique<Stats::StatsMatcherImpl>(bootstrap.stats_config());
+Utility::createStatsMatcher(const envoy::config::bootstrap::v3::Bootstrap& bootstrap,
+                            Stats::SymbolTable& symbol_table) {
+  return std::make_unique<Stats::StatsMatcherImpl>(bootstrap.stats_config(), symbol_table);
 }
 
 Stats::HistogramSettingsConstPtr
@@ -241,22 +249,6 @@ Grpc::AsyncClientFactoryPtr Utility::factoryForGrpcApiConfigSource(
   grpc_service.MergeFrom(api_config_source.grpc_services(0));
 
   return async_client_manager.factoryForGrpcService(grpc_service, scope, skip_cluster_check);
-}
-
-envoy::config::endpoint::v3::ClusterLoadAssignment Utility::translateClusterHosts(
-    const Protobuf::RepeatedPtrField<envoy::config::core::v3::Address>& hosts) {
-  envoy::config::endpoint::v3::ClusterLoadAssignment load_assignment;
-  envoy::config::endpoint::v3::LocalityLbEndpoints* locality_lb_endpoints =
-      load_assignment.add_endpoints();
-  // Since this LocalityLbEndpoints is built from hosts list, set the default weight to 1.
-  locality_lb_endpoints->mutable_load_balancing_weight()->set_value(1);
-  for (const envoy::config::core::v3::Address& host : hosts) {
-    envoy::config::endpoint::v3::LbEndpoint* lb_endpoint =
-        locality_lb_endpoints->add_lb_endpoints();
-    lb_endpoint->mutable_endpoint()->mutable_address()->MergeFrom(host);
-    lb_endpoint->mutable_load_balancing_weight()->set_value(1);
-  }
-  return load_assignment;
 }
 
 void Utility::translateOpaqueConfig(const ProtobufWkt::Any& typed_config,

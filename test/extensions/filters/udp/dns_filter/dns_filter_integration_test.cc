@@ -1,6 +1,6 @@
 #include "envoy/config/bootstrap/v3/bootstrap.pb.h"
 
-#include "extensions/filters/udp/dns_filter/dns_filter.h"
+#include "source/extensions/filters/udp/dns_filter/dns_filter.h"
 
 #include "test/integration/integration.h"
 #include "test/test_common/network_utility.h"
@@ -32,7 +32,11 @@ public:
   static std::string configToUse() {
     return fmt::format(R"EOF(
 admin:
-  access_log_path: {}
+  access_log:
+  - name: envoy.access_loggers.file
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+      path: "{}"
   address:
     socket_address:
       address: 127.0.0.1
@@ -84,18 +88,22 @@ listener_filters:
     stat_prefix: "my_prefix"
     client_config:
       resolver_timeout: 1s
-      upstream_resolvers:
-      - socket_address:
-          address: {}
-          port_value: {}
+      dns_resolution_config:
+        resolvers:
+        - socket_address:
+            address: {}
+            port_value: {}
+        dns_resolver_options:
+          use_tcp_for_dns_lookups: false
+          no_default_search_domain: false
       max_pending_lookups: 256
     server_config:
       inline_dns_table:
         external_retry_count: 0
-        known_suffixes:
-        - suffix: "foo1.com"
-        - suffix: "cluster_0"
         virtual_domains:
+        - name: "im_just_here_so_coverage_doesnt_fail.foo1.com"
+          endpoint:
+            cluster_name: "cluster_0"
         - name: "www.foo1.com"
           endpoint:
             address_list:
@@ -149,8 +157,6 @@ listener_filters:
     server_config:
       inline_dns_table:
         external_retry_count: 0
-        known_suffixes:
-        - suffix: "google.com"
         virtual_domains:
         - name: "www.google.com"
           endpoint:
@@ -164,7 +170,7 @@ listener_filters:
   }
 
   void setup(uint32_t upstream_count) {
-    udp_fake_upstream_ = true;
+    setUdpFakeUpstream(FakeUpstreamConfig::UdpConfig());
     if (upstream_count > 1) {
       setDeterministic();
       setUpstreamCount(upstream_count);
@@ -232,7 +238,7 @@ TEST_P(DnsFilterIntegrationTest, ExternalLookupTest) {
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(1, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 }
 
 TEST_P(DnsFilterIntegrationTest, ExternalLookupTestIPv6) {
@@ -250,7 +256,7 @@ TEST_P(DnsFilterIntegrationTest, ExternalLookupTestIPv6) {
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(1, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 }
 
 TEST_P(DnsFilterIntegrationTest, LocalLookupTest) {
@@ -268,7 +274,7 @@ TEST_P(DnsFilterIntegrationTest, LocalLookupTest) {
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(4, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 }
 
 TEST_P(DnsFilterIntegrationTest, ClusterLookupTest) {
@@ -292,7 +298,7 @@ TEST_P(DnsFilterIntegrationTest, ClusterLookupTest) {
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(2, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 }
 
 TEST_P(DnsFilterIntegrationTest, ClusterEndpointLookupTest) {
@@ -317,7 +323,7 @@ TEST_P(DnsFilterIntegrationTest, ClusterEndpointLookupTest) {
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(2, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 }
 
 TEST_P(DnsFilterIntegrationTest, ClusterEndpointWithPortServiceRecordLookupTest) {
@@ -335,7 +341,7 @@ TEST_P(DnsFilterIntegrationTest, ClusterEndpointWithPortServiceRecordLookupTest)
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(2, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 
   for (const auto& answer : query_ctx_->answers_) {
     EXPECT_EQ(answer.second->type_, DNS_RECORD_TYPE_SRV);
@@ -370,7 +376,7 @@ TEST_P(DnsFilterIntegrationTest, ClusterEndpointWithoutPortServiceRecordLookupTe
   EXPECT_TRUE(query_ctx_->parse_status_);
 
   EXPECT_EQ(endpoints, query_ctx_->answers_.size());
-  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_parser_->getQueryResponseCode());
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, query_ctx_->getQueryResponseCode());
 
   std::set<uint16_t> ports;
   for (const auto& answer : query_ctx_->answers_) {

@@ -1,10 +1,10 @@
-#include "extensions/filters/network/mongo_proxy/utility.h"
+#include "source/extensions/filters/network/mongo_proxy/utility.h"
 
 #include <string>
 
 #include "envoy/common/exception.h"
 
-#include "common/json/json_loader.h"
+#include "source/common/json/json_loader.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -22,6 +22,17 @@ QueryMessageInfo::QueryMessageInfo(const QueryMessage& query)
     if (command_ == "find") {
       command_ = "";
       parseFindCommand(*command);
+      // command aliases
+    } else if (command_ == "collstats") {
+      command_ = "collStats";
+    } else if (command_ == "dbstats") {
+      command_ = "dbStats";
+    } else if (command_ == "findandmodify") {
+      command_ = "findAndModify";
+    } else if (command_ == "getlasterror") {
+      command_ = "getLastError";
+    } else if (command_ == "ismaster") {
+      command_ = "isMaster";
     }
 
     return;

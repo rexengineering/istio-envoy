@@ -1,4 +1,4 @@
-#include "extensions/filters/network/mongo_proxy/mongo_stats.h"
+#include "source/extensions/filters/network/mongo_proxy/mongo_stats.h"
 
 #include <memory>
 #include <string>
@@ -6,14 +6,15 @@
 
 #include "envoy/stats/scope.h"
 
-#include "common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table_impl.h"
 
 namespace Envoy {
 namespace Extensions {
 namespace NetworkFilters {
 namespace MongoProxy {
 
-MongoStats::MongoStats(Stats::Scope& scope, absl::string_view prefix)
+MongoStats::MongoStats(Stats::Scope& scope, absl::string_view prefix,
+                       const std::vector<std::string>& commands)
     : scope_(scope), stat_name_set_(scope.symbolTable().makeSet("Mongo")),
       prefix_(stat_name_set_->add(prefix)), callsite_(stat_name_set_->add("callsite")),
       cmd_(stat_name_set_->add("cmd")), collection_(stat_name_set_->add("collection")),
@@ -25,10 +26,9 @@ MongoStats::MongoStats(Stats::Scope& scope, absl::string_view prefix)
       scatter_get_(stat_name_set_->add("scatter_get")), total_(stat_name_set_->add("total")),
       unknown_command_(stat_name_set_->add("unknown_command")) {
 
-  // TODO(jmarantz): is this the right set of mongo commands to use as builtins?
-  // Should we also have builtins for callsites or collections, or do those need
-  // to be dynamic?
-  stat_name_set_->rememberBuiltins({"insert", "query", "update", "delete"});
+  for (const auto& cmd : commands) {
+    stat_name_set_->rememberBuiltin(cmd);
+  }
 }
 
 Stats::ElementVec MongoStats::addPrefix(const Stats::ElementVec& names) {

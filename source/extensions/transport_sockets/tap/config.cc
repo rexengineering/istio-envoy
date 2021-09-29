@@ -1,15 +1,14 @@
-#include "extensions/transport_sockets/tap/config.h"
+#include "source/extensions/transport_sockets/tap/config.h"
 
 #include "envoy/config/tap/v3/common.pb.h"
 #include "envoy/extensions/transport_sockets/tap/v3/tap.pb.h"
 #include "envoy/extensions/transport_sockets/tap/v3/tap.pb.validate.h"
 #include "envoy/registry/registry.h"
 
-#include "common/config/utility.h"
-#include "common/protobuf/utility.h"
-
-#include "extensions/transport_sockets/tap/tap.h"
-#include "extensions/transport_sockets/tap/tap_config_impl.h"
+#include "source/common/config/utility.h"
+#include "source/common/protobuf/utility.h"
+#include "source/extensions/transport_sockets/tap/tap.h"
+#include "source/extensions/transport_sockets/tap/tap_config_impl.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -22,7 +21,7 @@ public:
 
   // TapConfigFactory
   Extensions::Common::Tap::TapConfigSharedPtr
-  createConfigFromProto(envoy::config::tap::v3::TapConfig&& proto_config,
+  createConfigFromProto(const envoy::config::tap::v3::TapConfig& proto_config,
                         Extensions::Common::Tap::Sink* admin_streamer) override {
     return std::make_shared<SocketTapConfigImpl>(std::move(proto_config), admin_streamer,
                                                  time_source_);

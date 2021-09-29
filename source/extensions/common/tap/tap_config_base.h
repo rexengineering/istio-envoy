@@ -7,8 +7,8 @@
 #include "envoy/data/tap/v3/common.pb.h"
 #include "envoy/data/tap/v3/wrapper.pb.h"
 
-#include "extensions/common/matcher/matcher.h"
-#include "extensions/common/tap/tap.h"
+#include "source/extensions/common/matcher/matcher.h"
+#include "source/extensions/common/tap/tap.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -101,7 +101,7 @@ public:
   bool streaming() const override { return streaming_; }
 
 protected:
-  TapConfigBaseImpl(envoy::config::tap::v3::TapConfig&& proto_config,
+  TapConfigBaseImpl(const envoy::config::tap::v3::TapConfig& proto_config,
                     Common::Tap::Sink* admin_streamer);
 
 private:

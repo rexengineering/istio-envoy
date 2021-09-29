@@ -1,10 +1,10 @@
-#include "extensions/filters/network/thrift_proxy/router/router_ratelimit_impl.h"
+#include "source/extensions/filters/network/thrift_proxy/router/router_ratelimit_impl.h"
 
 #include "envoy/common/exception.h"
 #include "envoy/config/route/v3/route_components.pb.h"
 #include "envoy/ratelimit/ratelimit.h"
 
-#include "extensions/filters/network/thrift_proxy/router/router.h"
+#include "source/extensions/filters/network/thrift_proxy/router/router.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -40,13 +40,14 @@ bool RequestHeadersAction::populateDescriptor(const RouteEntry&, RateLimit::Desc
     return true;
   }
 
-  const Http::HeaderEntry* header_value = metadata.headers().get(header_name_);
-  if (!header_value) {
+  const auto header_value = metadata.headers().get(header_name_);
+  if (header_value.empty()) {
     return false;
   }
 
+  // TODO(https://github.com/envoyproxy/envoy/issues/13454): Potentially populate all values.
   descriptor.entries_.push_back(
-      {descriptor_key_, std::string(header_value->value().getStringView())});
+      {descriptor_key_, std::string(header_value[0]->value().getStringView())});
   return true;
 }
 
